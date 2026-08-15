@@ -28,14 +28,15 @@ changelog/versioning אוטומטי מהיסטוריית ה-commits.
   `terraform plan` — תוצאת ה-plan מתפרסמת כ-comment אוטומטי על ה-PR
 - commitlint (בדיקת conventional commits)
 
-## AI review bot — advisory בלבד, לא required check
+## AI review bot — `anthropics/claude-code-action`, advisory בלבד
 GitHub Actions workflow נוסף (`on: pull_request`), רץ **במקביל** לצ'קים
 למעלה אבל **לא חוסם merge** — תוצאת ה-check הזה לא נכנסת לרשימת ה-required
-checks. פרטי הארכיטקטורה המלאים (trigger/agent loop/auth/מיקום קוד) ב-
-`architecture.md` decision #8. בקצרה:
-- מריץ agent loop מול Claude API עם tools read-only על הקוד המשתנה ב-PR.
-- מפרסם review עם inline comments (Pull Request Review API), לא תגובה בודדת.
-- קוד הבוט חי בחבילה נפרדת מ-`backend/`, לא כחלק מה-NestJS app.
+checks. הרציונל המלא (כולל למה לא נבנה בוט custom) ב-`architecture.md`
+decision #8. בקצרה:
+- `anthropics/claude-code-action@v1` — action רשמי, לא קוד custom.
+- התקנה: `/install-github-app` מטרמינל Claude Code (דורש אישור אינטראקטיבי
+  ידני — לא ניתן להריץ מ-session לא-אינטראקטיבי).
+- checklist מותאם אישית ל-Nissim (12-factor + עקרונות מ-`architecture.md`).
 
 ## Approval policy — required checks בלבד, בלי human approval פורמלי
 זה **פרויקט של אדם אחד** — GitHub לא סופר אישור של מחבר ה-PR לעצמו לכיוון

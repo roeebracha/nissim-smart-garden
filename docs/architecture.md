@@ -144,35 +144,36 @@
   פיזית גרידא). `planter_id` עובר להיות שדה על `sensors`/`actuators` עצמם —
   כל חיישן/אקטואטור בודד שייך לאדנית ספציפית, גם אם הם חולקים אותו device.
 
-### 8. בוט AI review אוטומטי ל-PRs — GitHub Actions, agent loop, advisory בלבד
+### 8. בוט AI review אוטומטי ל-PRs — `anthropics/claude-code-action`, לא בוט custom
 - **הקשר**: רוצים review אוטומטי על כל PR ב-Nissim (לא ידני כמו `/code-review
   ultra`). נבדק מול 12-factor ומול best practice של כלי review אמיתיים
   (CodeRabbit, Copilot review).
-- **החלטה**:
-  - **Trigger**: GitHub Actions workflow על `pull_request` — לא GitHub App/webhook
-    (אין endpoint ציבורי להחזיק) ולא polling (לא event-driven).
-  - **LLM call pattern**: agent loop ידני מול Claude API עם tools **read-only**
-    (`get_file`, `get_diff`, `list_changed_files`) — לא single-shot prompt על
-    ה-diff בלבד. אותו pattern בדיוק כמו decision #5 (agent loop ידני, לא
-    framework), עם `max_tool_calls` cap ו-trace logging מלא כמו שם.
-  - **פרסום**: Pull Request Review API עם inline comments מעוגנים לשורה — לא
-    תגובה בודדת (issue comment).
-  - **Auth**: `GITHUB_TOKEN` המובנה של ה-Action (repo-scoped) — מספיק כי הבוט
-    משרת את Nissim בלבד, לא כלי multi-repo (לא נדרש GitHub App/installation token).
-  - **מיקום קוד**: חבילה נפרדת (למשל `tools/pr-review-bot/`), לא בתוך
-    `backend/` (NestJS) — dependency graph שונה לגמרי (אין DB/Prisma, רק
-    GitHub API client + Claude SDK).
-  - **Gate status**: **advisory בלבד** — לא required check. עקבי עם ה-ADR
-    ב-`git-workflow.md` שקובע gate = required checks בלבד (ראה שם); AI review
-    לא אמור לחסום merge בפרויקט סולו.
-- **נימוק על 12-factor**: 12-factor נכתב לשירות חי (port binding, process
-  model) — בוט שרץ כ-job חד-פעמי ב-Actions הוא סקריפט, לא שירות, ורוב
-  ה-factors לא רלוונטיים (מתקיימים אוטומטית כי Actions job הוא disposable
-  מטבעו). מה שכן תופס בפועל ומכתיב את ההחלטות למעלה: Factor I (codebase נפרד
-  לכל app — קוד הבוט לא נכנס ל-NestJS), Factor II (dependencies מפורשים —
-  `package.json` עצמאי), Factor III (config דרך env/GitHub Secrets, לא
-  hardcoded), Factor XI (logs כ-stdout stream — Actions תופס אוטומטית).
-- **פירוט מלא של ה-workflow ותוספת ל-PR checks**: ראה `git-workflow.md`.
+- **חלופה שנשקלה ונדחתה — בוט custom (v1 single-shot + v2 agent loop)**:
+  תוכננה גרסה מדורגת (v1: קריאה בודדת ל-Claude על ה-diff, תגובה מרוכזת;
+  v2 עתידי: agent loop עם tools read-only, inline comments — אותו pattern
+  כמו decision #5) בהיקף ~150-800 שורות TS, בחבילה נפרדת מ-`backend/`. **נדחתה
+  לאחר שהתברר שקיים `anthropics/claude-code-action@v1`** — action רשמי של
+  Anthropic (מ-ספט' 2025) שמריץ את מלוא ה-runtime של Claude Code בתוך ה-runner
+  (קריאת קבצים, git, shell) ותומך "out of the box" ב-automatic PR review
+  (trigger על `pull_request`, checklist מותאם אישית, path-specific review).
+- **החלטה**: משתמשים ב-`anthropics/claude-code-action@v1` הקיים. **0 קוד
+  custom** — רק workflow yaml + GitHub App installation (`/install-github-app`
+  מטרמינל Claude Code, דורש אישור אינטראקטיבי של המשתמש — לא ניתן לאוטומציה
+  מלאה).
+  - **Trigger**: GitHub Actions workflow על `pull_request` (opened/synchronize).
+  - **Checklist מותאם אישית**: מוגדר בקונפיג ה-action — כולל התייחסות ל-12-factor
+    ולעקרונות שכבר מתועדים ב-`architecture.md`/`git-workflow.md` (למשל
+    separation of concerns בשכבות ה-AI, decision_source על actuator_events).
+  - **Gate status**: **advisory בלבד** — לא required check (ראה `git-workflow.md`).
+- **נימוק**: מול השיקול הלימודי (learning-approach.md) — הכתיבה של בוט custom
+  לא הייתה מתרגלת "לוגיקת ליבה" של הפרויקט (כמו decision #5, שבו agent loop
+  ידני משרת ישירות את שכבת ה-LLM המתוכננת), אלא היה מדובר בכלי-עזר סביבתי
+  (tooling). **Trade-off מודע ושונה מ-decision #5**: שם דחינו framework כי
+  הוא הסתיר בדיוק את המנגנון שרצינו לתרגל (agentic tool calling בליבת
+  המערכת); כאן ה-action הקיים לא מסתיר שום דבר שתוכנן לתרגול — זה כלי CI
+  צדדי, לא רכיב בארכיטקטורת האפליקציה. שימוש בכלי מוכן ומתוחזק ע"י Anthropic
+  עדיף כאן על פני תחזוקת קוד custom ללא ערך לימודי תואם.
+- **פירוט מלא של הוספה ל-PR checks**: ראה `git-workflow.md`.
 
 ## סכימת DB — קונספט (טרם ממומש)
 
