@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+.next/
+dist/
+generated/
+coverage/
+*.tfstate
+*.tfstate.backup
+.terraform/

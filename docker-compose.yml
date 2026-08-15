@@ -1,0 +1,66 @@
+# Services needed for local dev: postgres, mosquitto (MQTT broker), backend.
+# See docs/architecture.md for the layer diagram.
+services:
+  # "postgres" is a name we chose - other services will reach this one
+  # on the compose network using this exact name as the hostname
+  # (e.g. postgres:5432), not "localhost".
+  postgres:
+    # Pinned to major version 18, not `latest` - so a future rebuild
+    # can't silently jump to a new major version underneath us.
+    image: postgres:18
+    # Passed into the container's process env. Values are NOT hardcoded -
+    # ${...} pulls them from the real .env file at runtime (git-ignored),
+    # keeping secrets out of version control.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    # Named volume - without this, all data is gone on every `docker compose down`.
+    # Mount point is /var/lib/postgresql (not .../data) - as of image v18,
+    # Postgres manages a version-specific subdirectory under it itself,
+    # to support in-place major-version upgrades via pg_upgrade.
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    # `depends_on` only waits for a container to start, not for Postgres to
+    # actually accept connections - this healthcheck is what lets backend's
+    # `condition: service_healthy` (below) wait for the real thing.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MQTT broker (decision #1, architecture.md). Config is file-based, not
+  # env vars - the default image config rejects all external connections
+  # without an explicit mosquitto.conf.
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+
+  backend:
+    # Builds our own image from backend/Dockerfile - not a pre-made image
+    # like the two services above.
+    build: ./backend
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      # Must equal the mosquitto service name above, not "localhost" -
+      # same networking rule as postgres.
+      MQTT_BROKER_HOST: ${MQTT_BROKER_HOST}
+      MQTT_BROKER_PORT: ${MQTT_BROKER_PORT}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  mosquitto_data:

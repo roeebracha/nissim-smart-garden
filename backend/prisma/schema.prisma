@@ -1,0 +1,122 @@
+// Prisma schema — datasource (Postgres) + generator + models for planters,
+// devices, sensors, sensor_readings, actuators, actuator_events,
+// automation_rules, llm_insights, llm_suggestions. See docs/architecture.md
+// for the DB schema concept table.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Planter {
+  id              Int              @id @default(autoincrement())
+  name            String
+  sensors         Sensor[]
+  actuators       Actuator[]
+  automationRules AutomationRule[]
+  llmInsights     LlmInsight[]
+
+  @@map("planters")
+}
+
+model Sensor {
+  id        Int             @id @default(autoincrement())
+  name      String
+  type      String // moisture / light / temperature
+  planterId Int
+  planter   Planter         @relation(fields: [planterId], references: [id])
+  deviceId  Int
+  device    Device          @relation(fields: [deviceId], references: [id])
+  readings  SensorReading[]
+
+  @@map("sensors")
+}
+
+model SensorReading {
+  id         Int      @id @default(autoincrement())
+  value      Float
+  recordedAt DateTime // device clock - when the reading was actually taken
+  receivedAt DateTime @default(now()) // server clock - when we received it
+  sensorId   Int
+  sensor     Sensor   @relation(fields: [sensorId], references: [id])
+
+  // keeps the actual Postgres table named "sensor_readings" while the
+  // Prisma model itself stays PascalCase + singular, matching everything else.
+  @@map("sensor_readings")
+}
+
+model Device {
+  id         Int        @id @default(autoincrement())
+  name       String
+  lastSeenAt DateTime
+  sensors    Sensor[]
+  actuators  Actuator[]
+
+  @@map("devices")
+}
+
+model Actuator {
+  id            Int             @id @default(autoincrement())
+  name          String
+  type          String // pump / light
+  desiredState  String
+  desiredSince  DateTime
+  reportedState String
+  reportedAt    DateTime
+  planterId     Int
+  planter       Planter         @relation(fields: [planterId], references: [id])
+  deviceId      Int
+  device        Device          @relation(fields: [deviceId], references: [id])
+  events        ActuatorEvent[]
+
+  @@map("actuators")
+}
+
+enum DecisionSource {
+  manual
+  rule
+  ml
+}
+
+model ActuatorEvent {
+  id             Int            @id @default(autoincrement())
+  // server-side timestamp - decisions are made by our own system
+  // (manual/rule/ml), so there's no separate device-clock to track here,
+  // unlike SensorReading.
+  triggeredAt    DateTime       @default(now())
+  decisionSource DecisionSource
+  actuatorId     Int
+  actuator       Actuator       @relation(fields: [actuatorId], references: [id])
+
+  @@map("actuator_events")
+}
+
+model AutomationRule {
+  id             Int     @id @default(autoincrement())
+  name           String
+  sensorType     String // matches Sensor.type
+  actuatorType   String // matches Actuator.type
+  // first pass - a single threshold may not be enough once we design the
+  // actual decision engine (range? comparison operator?) - revisit then.
+  thresholdValue Float
+  enabled        Boolean @default(true)
+  planterId      Int
+  planter        Planter @relation(fields: [planterId], references: [id])
+
+  @@map("automation_rules")
+}
+
+model LlmInsight {
+  id        Int      @id @default(autoincrement())
+  content   String
+  createdAt DateTime @default(now())
+  planterId Int?
+  planter   Planter? @relation(fields: [planterId], references: [id])
+
+  @@map("llm_insights")
+}
