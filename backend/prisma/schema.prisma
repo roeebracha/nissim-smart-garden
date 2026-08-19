@@ -10,7 +10,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url=env("DATABASE_URL")
 }
 
 model Planter {
@@ -83,6 +83,19 @@ enum DecisionSource {
   ml
 }
 
+enum ThresholdOperator {
+less_than
+ greater_than
+}
+
+enum ThresholdSource {
+seed
+ml
+}
+
+
+
+
 model ActuatorEvent {
   id             Int            @id @default(autoincrement())
   // server-side timestamp - decisions are made by our own system
@@ -101,9 +114,11 @@ model AutomationRule {
   name           String
   sensorType     String // matches Sensor.type
   actuatorType   String // matches Actuator.type
-  // first pass - a single threshold may not be enough once we design the
-  // actual decision engine (range? comparison operator?) - revisit then.
-  thresholdValue Float
+  onThreshold Float
+  offThreshold Float
+  updatedBy ThresholdSource
+  updatedAt DateTime @updatedAt
+  operator  ThresholdOperator
   enabled        Boolean @default(true)
   planterId      Int
   planter        Planter @relation(fields: [planterId], references: [id])

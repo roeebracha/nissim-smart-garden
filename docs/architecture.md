@@ -175,6 +175,24 @@
   עדיף כאן על פני תחזוקת קוד custom ללא ערך לימודי תואם.
 - **פירוט מלא של הוספה ל-PR checks**: ראה `git-workflow.md`.
 
+### 9. DecisionModule: rule ו-ML הם אותו מסלול הערכה — ML מכייל thresholds, לא מחליט ישירות
+- **הקשר**: decision #2 קבע ש"rules+ML יחד מריצים את הלולאה" אבל לא קבע את היחס
+  בפועל בין השניים. עלה תוך כדי תכנון מפורט של ה-DecisionModule (roadmap #7):
+  האם rule ו-ML הם שני evaluators נפרדים (עם conflict-resolution ביניהם), או
+  מסלול אחד?
+- **החלטה**: מסלול הערכה **אחד** — DecisionModule תמיד מעריך threshold rules
+  (עם hysteresis: on/off thresholds נפרדים, לא סף בודד) מתוך `automation_rules`.
+  ה-ML batch job (roadmap #8) רק **מעדכן את ה-thresholds בטבלה** לפי דאטה
+  שנאסף — הוא **לא** מייצר החלטת actuator בעצמו. Cold start הוא פשוט
+  "thresholds ברירת מחדל שטרם עודכנו ע"י ML", לא code path נפרד.
+- **נימוק**: מסלול אחד = DecisionModule נבדק ב-unit tests בלי תלות בזמינות/מצב
+  ML, ואין צורך בלוגיקת הכרעה בין שני evaluators שעלולים לסתור זה את זה.
+- **השלכה על סכימה**: `automation_rules` צריך `onThreshold`/`offThreshold` +
+  `operator` (במקום `thresholdValue` בודד — הפער כבר סומן בקומנט בסכמה) +
+  שדה provenance (seed ידני מול עדכון ML, לביקורת). בפועל, `decision_source`
+  על `actuator_events` תמיד יהיה `'rule'` תחת התכנון הזה — הערך `'ml'`
+  ב-enum נשאר שמור לעתיד (מסלול ML-direct אם אי-פעם יתווסף), לא בשימוש כרגע.
+
 ## סכימת DB — קונספט (טרם ממומש)
 
 | טבלה | תפקיד |
