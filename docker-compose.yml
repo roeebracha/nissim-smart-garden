@@ -48,7 +48,11 @@ services:
     # like the two services above.
     build: ./backend
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      # Built directly from the credential parts (not ${DATABASE_URL} from
+      # .env) - inside this container "localhost" would mean the backend
+      # container itself, not the postgres one. Host must stay "postgres"
+      # (the compose service name), same rule as MQTT_BROKER_HOST below.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       # Must equal the mosquitto service name above, not "localhost" -
       # same networking rule as postgres.
       MQTT_BROKER_HOST: ${MQTT_BROKER_HOST}
