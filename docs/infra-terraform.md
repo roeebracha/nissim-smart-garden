@@ -1,7 +1,7 @@
 # Nissim — Terraform & GCP Infrastructure
 
 מגדיר את מבנה ה-Terraform ואת החלטות ה-infra ב-GCP. ליחס בין הסביבות
-(staging/production) ולתהליך ה-deploy עצמו ראו [`git-workflow.md`](./git-workflow.md).
+(dev/prod) ולתהליך ה-deploy עצמו ראו [`git-workflow.md`](./git-workflow.md).
 
 ## מבנה תיקיות
 ```
@@ -13,14 +13,14 @@ infra/terraform/
 │   ├── artifact-registry/        # Docker registry
 │   └── iam/                      # service accounts + Workload Identity Federation
 └── environments/
-    ├── staging/                  # root config -> modules, remote state ב-GCS
-    └── production/
+    ├── dev/                      # root config -> modules, remote state ב-GCS
+    └── prod/
 ```
 לא `terraform workspace` — HashiCorp ממליצים נגד זה להפרדת סביבות (סיכון
 לערבוב state בטעות). תיקייה נפרדת per environment = state נפרד, בידוד אמיתי.
 
-## Decision: פרויקט GCP אחד משותף ל-staging+production
-משאבים מתויגים/משוימים per env בתוך אותו פרויקט (למשל `nissim-db-staging`).
+## Decision: פרויקט GCP אחד משותף ל-dev+prod
+משאבים מתויגים/משוימים per env בתוך אותו פרויקט (למשל `nissim-db-dev`).
 נבחר לצורך עלות ופשטות בסקאלת פרויקט אישי — מודעים שזה פחות מבודד מ-2
 פרויקטים נפרדים (שזו הפרקטיקה המלאה בארגון אמיתי, ותישקל שוב אם הפרויקט יגדל).
 

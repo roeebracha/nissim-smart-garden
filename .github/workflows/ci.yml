@@ -1,0 +1,134 @@
+# Required PR checks. Policy: docs/git-workflow.md.
+# Advisory AI review is a different workflow (pr-review.yml) and must not be required.
+
+name: CI  # title shown in GitHub Actions
+
+on:  # which GitHub events start this workflow
+  pull_request:  # run when a PR is opened or updated
+
+concurrency:  # stop overlapping runs of the same PR
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}  # one run per PR
+  cancel-in-progress: true  # stop old runs when you push again
+
+permissions:  # least privilege for every job below
+  contents: read  # this workflow only needs to read the repo
+
+env:  # variables available to every job
+  DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci  # dummy URL so prisma generate can run (no real DB)
+
+jobs:  # the required checks before merge
+  lint:  # eslint — style/syntax problems, does not rewrite files
+    name: Lint  # label in the GitHub checks list
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    defaults:  # defaults for every `run:` step in this job
+      run:  # apply only to shell steps, not to `uses:`
+        working-directory: backend  # all `run:` steps in this job start in backend/
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy the PR code onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+      - name: Setup Node 24  # same major as backend/Dockerfile
+        uses: actions/setup-node@v4  # official Node installer
+        with:  # inputs for that action
+          node-version: '24'  # major version to install
+          cache: npm  # reuse downloaded packages between runs
+          cache-dependency-path: backend/package-lock.json  # lockfile that defines the cache key
+      - name: Install deps  # exact versions from package-lock.json
+        run: npm ci  # clean install from the lockfile, not `npm install`
+      - name: Generate Prisma client  # generated/ is gitignored — lint needs it
+        run: npx prisma generate  # writes the client from schema.prisma
+      - name: Run eslint  # fail on lint errors; no --fix
+        run: npm run lint:check  # eslint --max-warnings=0
+
+  typecheck:  # tsc — TypeScript type errors
+    name: Typecheck  # label in the GitHub checks list
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    defaults:  # defaults for every `run:` step in this job
+      run:  # apply only to shell steps, not to `uses:`
+        working-directory: backend  # all `run:` steps in this job start in backend/
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy the PR code onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+      - name: Setup Node 24  # same major as backend/Dockerfile
+        uses: actions/setup-node@v4  # official Node installer
+        with:  # inputs for that action
+          node-version: '24'  # major version to install
+          cache: npm  # reuse downloaded packages between runs
+          cache-dependency-path: backend/package-lock.json  # lockfile that defines the cache key
+      - name: Install deps  # exact versions from package-lock.json
+        run: npm ci  # clean install from the lockfile, not `npm install`
+      - name: Generate Prisma client  # generated/ is gitignored — tsc needs it
+        run: npx prisma generate  # writes the client from schema.prisma
+      - name: Run tsc  # compile-check only, does not emit JS
+        run: npm run typecheck  # tsc --noEmit -p tsconfig.build.json
+
+  test:  # jest — unit tests
+    name: Tests  # label in the GitHub checks list
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    defaults:  # defaults for every `run:` step in this job
+      run:  # apply only to shell steps, not to `uses:`
+        working-directory: backend  # all `run:` steps in this job start in backend/
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy the PR code onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+      - name: Setup Node 24  # same major as backend/Dockerfile
+        uses: actions/setup-node@v4  # official Node installer
+        with:  # inputs for that action
+          node-version: '24'  # major version to install
+          cache: npm  # reuse downloaded packages between runs
+          cache-dependency-path: backend/package-lock.json  # lockfile that defines the cache key
+      - name: Install deps  # exact versions from package-lock.json
+        run: npm ci  # clean install from the lockfile, not `npm install`
+      - name: Generate Prisma client  # generated/ is gitignored — tests need it
+        run: npx prisma generate  # writes the client from schema.prisma
+      - name: Run jest  # --passWithNoTests until the first *.spec.ts exists
+        run: npx jest --passWithNoTests  # unit tests; do not fail if there are none yet
+
+  docker:  # image must build even if npm scripts pass
+    name: Docker  # label in the GitHub checks list
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy the PR code onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+      - name: Build backend image  # no push — that belongs in deploy.yml
+        run: docker build -t nissim-backend:ci ./backend  # prove the Dockerfile still builds
+
+  commitlint:  # every commit on the PR must be Conventional Commits (feat/fix/infra/…)
+    name: Commitlint  # label in the GitHub checks list
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy the PR code onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+        with:  # inputs for that action
+          fetch-depth: 0  # full history — needed to lint all PR commits, not just the last one
+      - name: Lint commit messages  # feat:/fix:/infra: etc. — see commitlint.config.mjs
+        uses: wagoid/commitlint-github-action@v6  # compares PR commits against the config
+
+  terraform:  # fmt + validate only; plan needs real env configs + WIF (later)
+    name: Terraform  # label in the GitHub checks list
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy the PR code onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+      - name: Setup Terraform  # install the terraform CLI on the VM
+        uses: hashicorp/setup-terraform@v3  # official Terraform installer
+        with:  # inputs for that action
+          terraform_version: 1.15.8  # match local terraform
+          terraform_wrapper: false  # use real terraform exit codes
+      - name: Check formatting  # fail if .tf files are not `terraform fmt` clean
+        working-directory: infra/terraform  # run from the terraform root
+        run: terraform fmt -check -recursive  # check only; does not rewrite files
+      - name: Validate bootstrap  # one-time GCS bucket / APIs
+        working-directory: infra/terraform/bootstrap  # bootstrap is a separate root module
+        run: |  # two commands in one step
+          terraform init -backend=false  # download providers; do not talk to GCS state
+          terraform validate  # syntax/schema check, no GCP apply
+      - name: Validate dev  # still a skeleton — fail if the files are invalid
+        working-directory: infra/terraform/environments/dev  # dev root module
+        run: |  # two commands in one step
+          terraform init -backend=false  # download providers; do not talk to GCS state
+          terraform validate  # syntax/schema check, no GCP apply
+      - name: Validate prod  # still a skeleton — fail if the files are invalid
+        working-directory: infra/terraform/environments/prod  # prod root module
+        run: |  # two commands in one step
+          terraform init -backend=false  # download providers; do not talk to GCS state
+          terraform validate  # syntax/schema check, no GCP apply

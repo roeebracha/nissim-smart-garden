@@ -19,14 +19,17 @@
 changelog/versioning אוטומטי מהיסטוריית ה-commits.
 
 ## PR checks (required status checks)
-כל PR חייב לעבור לפני merge:
-- Lint (ruff ל-Python, eslint ל-frontend)
-- Type check
-- Unit tests
-- `docker build` מצליח
-- ל-PR שנוגע ב-`infra/` בלבד: `terraform fmt` + `terraform validate` +
-  `terraform plan` — תוצאת ה-plan מתפרסמת כ-comment אוטומטי על ה-PR
-- commitlint (בדיקת conventional commits)
+כל PR חייב לעבור לפני merge (`.github/workflows/ci.yml`):
+- Lint — `npm run lint:check` ב-backend (eslint, בלי `--fix`). אין frontend עדיין.
+- Type check — `npm run typecheck` (`tsc --noEmit`)
+- Unit tests — jest (`--passWithNoTests` כל עוד אין `*.spec.ts`)
+- `docker build` של `backend/`
+- Terraform — `fmt -check -recursive` + `validate` על bootstrap ועל
+  environments/{dev,prod}. **plan + comment על ה-PR עדיין לא רץ**:
+  קונפיג הסביבות הוא שלד, ו-plan מול GCP דורש WIF. יתווסף כששני אלה קיימים.
+  ה-job רץ בכל PR (זול) — לא `paths:` filter — כדי ש-required check לא יישאר
+  "skipped" ב-PRs שלא נוגעים ב-`infra/` ויחסום merge.
+- commitlint — Conventional Commits, כולל type `infra` (`commitlint.config.mjs`)
 
 ## AI review bot — `anthropics/claude-code-action`, advisory בלבד
 GitHub Actions workflow נוסף (`on: pull_request`), רץ **במקביל** לצ'קים
@@ -47,22 +50,33 @@ decision #8. בקצרה:
 ## Environments ו-deployment flow
 
 ```
+פוש לכל branch (או Run workflow ידני)
+  → deploy ל-dev (סביבה משותפת אחת — הבראנץ' האחרון שמצליח דורס את הקודם)
+
 PR נפתח
-  → checks רצים (lint/tests/build/terraform plan/commitlint)
+  → checks רצים (lint/tests/build/terraform validate/commitlint)
   → merge ל-main (ידני, אחרי checks ירוקים)
-  → deploy אוטומטי ל-staging
-  → gate: אישור ידני (GitHub Environment "production" + required reviewer)
-  → deploy ל-production
+  → deploy ל-dev (שוב, מ-main)
+  → gate: אישור ידני (GitHub Environment "prod" + required reviewer)
+  → deploy ל-prod
 ```
 
-**staging**: deploy אוטומטי בכל merge ל-`main`, בלי אישור.
-**production**: environment נפרד עם required reviewer — ה-workflow job עוצר
-וממתין לאישור ידני לפני שהוא רץ מול production. זה בדיוק המנגנון שמייצג
-"אישור שלי לדיפלוימנט" — לא הרשאת deploy כללית, אלא gate per-deployment.
+**dev**: כל branch יכול להיפרס ל-dev (בדיקת פיצ'ר על סביבה אמיתית).
+אין preview per-PR — יש סביבת dev אחת, אז שני בראנצ'ים לא יכולים
+לשבת שם במקביל. `workflow_dispatch` מאפשר להריץ דיפלוי מבראנץ' בלי פוש חדש.
 
-## מיפוי עתידי ל-Terraform/CI-CD (לביצוע בשלבים 2-3 ב-roadmap)
+**prod**: רק מ-`main`. environment נפרד עם required reviewer — ה-job
+עוצר וממתין לאישור ידני. פיצ'ר branch לעולם לא נוגע ב-prod.
+
+## מיפוי ל-Terraform/CI-CD (roadmap שלבים 2–3)
 - Branch protection על `main` — משאב `github_branch_protection` (GitHub provider)
-- Environments (`staging`, `production`) + required reviewers —
+- Environments (`dev`, `prod`) + required reviewers על `prod` —
   `github_repository_environment`
-- GitHub Actions: workflow אחד ל-PR checks, workflow נפרד ל-deploy
-  (staging job ללא gate, production job מול environment מוגן)
+- GitHub Actions — רק תחת `.github/workflows/` (GitHub לא מריץ YAML מתיקייה
+  אחרת). שלושה קבצים, לפי אחריות:
+  - `.github/workflows/ci.yml` — PR checks (lint/typecheck/test/docker/
+    commitlint/terraform fmt+validate; plan יתווסף אחרי WIF + קונפיג סביבות)
+  - `.github/workflows/deploy.yml` — dev מכל branch (+ `workflow_dispatch`);
+    prod רק מ-`main` עם GitHub Environment + required reviewer
+  - `.github/workflows/pr-review.yml` — `anthropics/claude-code-action`,
+    advisory בלבד (לא required check)
