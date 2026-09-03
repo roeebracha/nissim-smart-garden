@@ -4,6 +4,10 @@
 // Empty for now - none of those feature modules exist yet (roadmap step 4+).
 // This is just the minimal root Nest requires to boot.
 import { Module } from '@nestjs/common';
+import { PrismaModule } from './prisma/prisma.module';
+import { DecisionModule } from './decision/decision.module';
 
-@Module({})
+@Module({
+  imports: [PrismaModule, DecisionModule],
+})
 export class AppModule {}
