@@ -60,13 +60,18 @@ model Device {
   @@map("devices")
 }
 
+enum ActuatorState {
+on
+off
+}
+
 model Actuator {
   id            Int             @id @default(autoincrement())
   name          String
   type          String // pump / light
-  desiredState  String
+  desiredState  ActuatorState
   desiredSince  DateTime
-  reportedState String
+  reportedState ActuatorState
   reportedAt    DateTime
   planterId     Int
   planter       Planter         @relation(fields: [planterId], references: [id])
@@ -123,6 +128,8 @@ model AutomationRule {
   planterId      Int
   planter        Planter @relation(fields: [planterId], references: [id])
 
+  
+  @@unique([planterId, sensorType, actuatorType])
   @@map("automation_rules")
 }
 

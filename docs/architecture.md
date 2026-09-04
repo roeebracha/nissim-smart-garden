@@ -193,6 +193,107 @@
   על `actuator_events` תמיד יהיה `'rule'` תחת התכנון הזה — הערך `'ml'`
   ב-enum נשאר שמור לעתיד (מסלול ML-direct אם אי-פעם יתווסף), לא בשימוש כרגע.
 
+### 10. חוזה MQTT ל-ingestion: topic + payload, מזהה sensor כשם לוגי לא כenum/PK
+- **הקשר**: תכנון ה-Ingestion module (roadmap #4) דרש להחליט בין mock דרך REST זמני
+  לבין MQTT אמיתי מיום 1 (Mosquitto כבר רץ ב-docker-compose), ולאחר מכן לקבוע
+  את החוזה בפועל בין ה-firmware (עתידי, roadmap #5) לבקאנד.
+- **החלטה**:
+  - Mock דרך MQTT אמיתי, לא REST זמני — נמנעים מקוד ingestion כפול/זרוק כשה-firmware
+    האמיתי יגיע, ובודקים בפועל את decision #1.
+  - **Topic**: `nissim/<device_id>/readings` — כל חיישני ה-device עולים לtopic אחד;
+    אין צורך בtopic נפרד לכל sensor כי ה-Ingestion מאזין לכל ה-device יחד.
+  - **Payload**: `{ sensor, value, recorded_at }` — הודעה אחת per קריאה (בלי batching).
+    `sensor` הוא **שם לוגי יציב** (למשל `"moisture_1"`), לא ה-id הפנימי של Postgres.
+  - הבקאנד ממפה (`device_id` + `sensor`) → שורה ב-`sensors` דרך `Sensor.name` הקיים
+    בסכימה, ומאמת את המיפוי בזמן ingestion (דוחה שמות לא מוכרים) — לא enum.
+- **נימוק**: נשקל enum משותף ל-payload ולבקאנד, ונדחה — enum מתאים לאוצר מילים
+  סגור ברמת קוד (כמו `DecisionSource`/`ThresholdOperator`), לא לישויות דאטה
+  שאמורות להיות ניתנות להגדרה ב-DB (אותו עיקרון כמו decision #9). enum על זהות
+  sensor דורש קוד+migration+redeploy כדי להוסיף חיישן — סותר את הסיבה שיש בכלל
+  טבלת `sensors`. גם אין רווח type-safety אמיתי בין הצדדים — ה-firmware (C++)
+  לא יכול לשתף enum של TypeScript ממילא, ה-payload הוא JSON חוצה-שפות שתמיד
+  דורש ולידציה בזמן ריצה. ולידציה מול `Sensor.name` נותנת את אותה הגנה מפני
+  typo/mismatch בלי לקשח מופעים ספציפיים בקוד.
+
+### 11. Ingestion → Decision Engine: קריאה ישירה (DI), לא event emitter
+- **הקשר**: decision #6 קבע שה-trigger הוא reactive — כל `sensor_readings` INSERT
+  מפעיל את בדיקת ה-decision "באותו handler" — אבל לא קבע את מנגנון החיבור בקוד
+  בין IngestionModule ל-DecisionModule.
+- **החלטה**: קריאה ישירה — `IngestionService` מזריק (DI) את `DecisionService`
+  וקורא לו ישירות (`await`) אחרי שמירת ה-reading. לא `@nestjs/event-emitter`.
+- **נימוק**: יש כרגע צרכן יחיד ל"קריאה חדשה נכנסה" (Decision Engine) — היתרון
+  המרכזי של event emitter (fan-out מנותק למספר צרכנים) לא רלוונטי עדיין.
+  זו לולאת ההחלטה האוטומטית הליבה של מערכת safety-critical (decision #2) —
+  ב-`EventEmitter2` חריגה בתוך listener לא חוזרת כברירת מחדל ל-emitter, כך
+  שבאג בהערכה עלול "להיבלע" בשקט; קריאה ישירה + `await` הופכת כשל לגלוי
+  ומתועד. גם שומרת על העיקרון מ-decision #5 — לחשוף את הזרימה בקוד, לא להסתיר
+  אותה מאחורי indirection. אם יעלה צרכן שני עצמאי בעתיד (למשל push ל-dashboard
+  ב-WebSocket), זו הנקודה לשקול event emitter מחדש — לא כרגע.
+
+### 12. DecisionModule מעריך hysteresis מול desiredState, לא reportedState
+- **הקשר**: להערכת hysteresis (decision #9) נדרש לדעת את "המצב הנוכחי" של
+  ה-actuator כדי להחליט מול איזה סף (on/off) להשוות את הקריאה החדשה.
+- **החלטה**: DecisionModule קורא את `Actuator.desiredState` (לא `reportedState`).
+- **נימוק**: מונע כפילות/התנגשות פקודות — `reportedState` מפגר טבעית אחרי
+  `desiredState` (ack latency), אז קריאה מולו הייתה גורמת ל-Decision Engine
+  "לשכוח" שכבר שלח פקודה ולשלוח פקודה כפולה בזמן שהראשונה עדיין ב-flight.
+  הפער בין desired/reported (decision #6) הוא concern נפרד לגמרי — execution
+  integrity על ציר זמן שונה (scheduled watchdog, טרם ממומש), לא consistency
+  של intent על כל קריאה בודדת (Decision Engine, reactive). לערבב את השניים
+  היה גורם ל-false positive על כל פקודה שנשלחת (latency רגיל = "תקלה").
+
+### 13. automation_rules: unique constraint על (planterId, sensorType, actuatorType)
+- **הקשר**: DecisionService צריך למצוא את ה-rule המתאים לכל reading לפי
+  planterId+sensorType — אין FK אמיתי בין sensors/actuators ל-automation_rules
+  (הם מותאמים כ-string matching). עלה חשש: מה מונע משני rules סותרים על
+  **אותו actuator בדיוק**?
+- **החלטה**: unique constraint ברמת ה-DB על `(planterId, sensorType, actuatorType)`
+  — לא רק בדיקה באפליקציה. rules עם אותו `sensorType` אך `actuatorType` שונה
+  (למשל טמפ'→מאוורר וגם טמפ'→מיסטור) מותרים ותקינים לגמרי; DecisionService
+  מעריך כל rule תואם בנפרד, כל אחד מול ה-actuator שלו.
+- **נימוק**: אכיפת invariant בשכבת ה-DB (לא רק בקוד השירות) מגנה גם מפני seed
+  שגוי או עריכה ידנית ב-DB, לא רק מבאג בלוגיקת האפליקציה. נשקלה גם אלטרנטיבה
+  גדולה יותר — להחליף את `sensorType`/`actuatorType` (strings) ב-FK אמיתי
+  (`sensorId`/`actuatorId`) — ונדחתה לעת עתה: FK מבטל typos/drift אך פוגע
+  ביכולת להחליף חיישן/actuator פיזי בלי לעדכן את ה-rule (string matching
+  "עובד אוטומטית" עם חומרה חדשה מאותו סוג/אדנית). נשאר known trade-off, לא
+  נסגר סופית.
+
+### 14. PrismaService משותף כ-`@Global()` module, לא import מפורש בכל מודול
+- **הקשר**: כמעט כל מודול עתידי (Decision, Ingestion, API, Operation, ML,
+  LLM) צריך גישה ל-Postgres דרך Prisma. צריך להחליט בין instance משותף
+  אחד (registered פעם אחת) לבין `imports: [PrismaModule]` חוזר בכל מודול
+  שצריך DB.
+- **החלטה**: `PrismaService` (`class PrismaService extends PrismaClient`,
+  `OnModuleInit` → `$connect()` מפורש בעלייה, `OnModuleDestroy`/shutdown
+  hook לסגירה מסודרת) עטוף ב-`PrismaModule` עם `@Global()`, נרשם פעם אחת
+  ב-`AppModule`. חי תחת `backend/src/prisma/`.
+- **נימוק**: `@Global()` הוא escape hatch מודע ב-NestJS, לא ברירת מחדל —
+  מוצדק כאן כי DB access נדרש כמעט בכל מודול (בניגוד ל-provider ספציפי
+  לפיצ'ר אחד), אותו pattern מקובל ל-infra services יחידים (DB, logging,
+  config). מונע חזרה על `imports: [PrismaModule]` בכל מודול פיצ'ר חדש.
+
+### 15. `Actuator.desiredState`/`reportedState`: `String` → `enum`
+- **הקשר**: תוך כדי תכנון `evaluate()` (roadmap #7): `evaluateHysteresis`
+  מצפה ל-`currentState: 'on' | 'off'` (union מדויק), אבל בסכימה השדות
+  מוגדרים `String` רגיל — פער טיפוסים בין הקוד לסכימה.
+- **החלטה**: הופכים את `desiredState`/`reportedState` ל-`enum` (למשל
+  `ActuatorState { on off }`), באותו pattern כמו `ThresholdOperator`/
+  `DecisionSource`/`ThresholdSource` הקיימים בסכימה.
+- **נימוק**: עקרון כללי מקובל — קבוצת ערכים סגורה וידועה מראש (on/off של
+  ממסר פיזי) אמורה להיות type, לא string חופשי ("illegal states
+  unrepresentable"). זה תואם ישירות את ההבחנה שכבר נקבעה ב-decision #10:
+  enum לאוצר מילים סגור ברמת קוד, `String` לנתונים שאמורים להיות ניתנים
+  להגדרה ב-DB (`Sensor.type`/`Actuator.type` **נשארים** `String` — סוג
+  החיישן/actuator הוא בדיוק המקרה שכן צריך גמישות, decision #10 — לא
+  מושפע מההחלטה הזו). **Caveat ידוע**: native enum ב-Postgres קשה לשנות
+  (הוספת ערך מוגבלת, הסרה/שינוי סדר כמעט בלתי אפשריים) — לא רלוונטי כאן כי
+  on/off הוא מצב בינארי יציב של ממסר פיזי, לא טקסונומיה שצפויה לגדול; גם
+  הסכימה כבר מקבלת את אותו סיכון במקומות אחרים. תמיכה עתידית ב-actuator
+  שאינו בינארי (dimmer) **לא מתוכננת כרגע** — over-engineering מוקדם לפי
+  אותו היגיון כמו decision #3, ותיפתר במידה ותידרש דרך migration נקודתי או
+  שדה נפרד לאותו actuator ספציפי, לא מתיחת ה-enum המשותף.
+
 ## סכימת DB — קונספט (טרם ממומש)
 
 | טבלה | תפקיד |
