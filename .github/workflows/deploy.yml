@@ -1,0 +1,130 @@
+# Dev: any branch (so a feature can be tried on the shared dev env).
+# Prod: main only, behind a GitHub Environment gate.
+# Policy: docs/git-workflow.md ("Environments ו-deployment flow").
+#
+# Separate file from ci.yml on purpose: different trigger (push / dispatch, not
+# pull_request), different permissions (OIDC + apply), and a GitHub Environment
+# on the prod job so the workflow pauses for a human click.
+#
+# Auth is Workload Identity Federation — no GCP JSON key secret
+# (docs/infra-terraform.md). Set these as GitHub Environment variables
+# (Settings → Environments → dev / prod):
+#   WIF_PROVIDER         — full provider resource name
+#   WIF_SERVICE_ACCOUNT  — github-actions@nissim-garden.iam.gserviceaccount.com
+# Add a required reviewer on the `prod` environment or that job will
+# not wait. Dev should have no required reviewer.
+#
+# Order: terraform apply first (creates Artifact Registry), then push the
+# image. Compute Engine VMs are not in this stage (infra-terraform.md).
+#
+# Dev is one shared GCP environment. The last successful branch deploy
+# wins — two feature branches cannot sit on dev at the same time.
+
+name: Deploy  # title shown in GitHub Actions — CD, not PR checks
+
+on:  # which GitHub events start this workflow
+  push:  # any branch that is pushed to origin
+    branches:
+      - '**'  # all branches; does not run on tags
+  workflow_dispatch:  # Actions tab → Run workflow → pick a branch
+
+permissions:  # OIDC for WIF; no contents: write
+  contents: read  # checkout the repo
+  id-token: write  # GitHub OIDC token exchanged at Google (not a JSON key)
+
+env:  # shared GCP coordinates (bootstrap/main.tf)
+  GCP_PROJECT_ID: nissim-garden  # one GCP project for dev + prod
+  GCP_REGION: us-central1  # match the google provider region
+  ARTIFACT_REPO: nissim  # Artifact Registry repository id
+  IMAGE_NAME: backend  # image name inside that repository
+
+jobs:  # dev on every branch; prod only from main
+  dev:  # shared dev — last successful deploy from any branch wins
+    name: Dev  # label in the GitHub checks list
+    # Skip until WIF is configured on the GitHub Environment (infra stage).
+    # Empty vars made every feature-branch push look like a failed PR check.
+    if: ${{ vars.WIF_PROVIDER != '' && vars.WIF_SERVICE_ACCOUNT != '' }}
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    environment: dev  # env-scoped WIF vars; no required reviewer
+    concurrency:  # one dev apply at a time across all branches
+      group: deploy-dev  # shared lock — not per-branch
+      cancel-in-progress: false  # do not kill terraform apply mid-run
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy this branch onto the VM (not always main)
+        uses: actions/checkout@v4  # official GitHub checkout action
+      - name: Authenticate to Google Cloud  # WIF — temporary token, not a JSON key
+        id: auth  # step id so docker login can use the access token
+        uses: google-github-actions/auth@v2  # official Google auth action
+        with:  # inputs for that action
+          token_format: access_token  # needed for docker/login-action below
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}  # Environment variable
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}  # Environment variable
+      - name: Setup Terraform  # same version as ci.yml
+        uses: hashicorp/setup-terraform@v3  # official Terraform installer
+        with:  # inputs for that action
+          terraform_version: 1.15.8  # match local terraform
+          terraform_wrapper: false  # use real terraform exit codes
+      - name: Terraform apply dev  # create/update dev resources (incl. Artifact Registry)
+        working-directory: infra/terraform/environments/dev  # dev root module
+        run: |  # init against GCS state, then apply
+          terraform init  # uses backend.tf (bucket nissim-garden-tfstate)
+          terraform apply -auto-approve  # no interactive prompt on CI
+      - name: Log in to Artifact Registry  # docker push uses the WIF access token
+        uses: docker/login-action@v3  # official Docker login
+        with:  # inputs for that action
+          registry: ${{ env.GCP_REGION }}-docker.pkg.dev  # GAR host for this region
+          username: oauth2accesstoken  # GAR expects this username with a token
+          password: ${{ steps.auth.outputs.access_token }}  # from google-github-actions/auth
+      - name: Build and push backend image  # tag with sha + dev
+        uses: docker/build-push-action@v6  # official buildx push
+        with:  # inputs for that action
+          context: ./backend  # Dockerfile lives here
+          push: true  # this is CD — unlike ci.yml which only builds
+          tags: |  # two tags for rollback / env tracking
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:dev
+
+  prod:  # never from a feature branch — live traffic stays on main
+    name: Prod  # label in the GitHub checks list
+    # Same WIF gate as Dev — skip until Environment vars exist.
+    if: ${{ github.ref == 'refs/heads/main' && vars.WIF_PROVIDER != '' && vars.WIF_SERVICE_ACCOUNT != '' }}
+    needs: [dev]  # do not start until the dev job is green
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    environment: prod  # GitHub pauses until a required reviewer approves
+    concurrency:  # one prod apply at a time
+      group: deploy-prod  # separate lock from dev
+      cancel-in-progress: false  # do not kill terraform apply mid-run
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy main onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+      - name: Authenticate to Google Cloud  # WIF — temporary token, not a JSON key
+        id: auth  # step id so docker login can use the access token
+        uses: google-github-actions/auth@v2  # official Google auth action
+        with:  # inputs for that action
+          token_format: access_token  # needed for docker/login-action below
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}  # Environment variable
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}  # Environment variable
+      - name: Setup Terraform  # same version as ci.yml
+        uses: hashicorp/setup-terraform@v3  # official Terraform installer
+        with:  # inputs for that action
+          terraform_version: 1.15.8  # match local terraform
+          terraform_wrapper: false  # use real terraform exit codes
+      - name: Terraform apply prod  # create/update prod resources
+        working-directory: infra/terraform/environments/prod  # prod root module
+        run: |  # init against GCS state, then apply
+          terraform init  # uses backend.tf (bucket nissim-garden-tfstate)
+          terraform apply -auto-approve  # no interactive prompt on CI
+      - name: Log in to Artifact Registry  # docker push uses the WIF access token
+        uses: docker/login-action@v3  # official Docker login
+        with:  # inputs for that action
+          registry: ${{ env.GCP_REGION }}-docker.pkg.dev  # GAR host for this region
+          username: oauth2accesstoken  # GAR expects this username with a token
+          password: ${{ steps.auth.outputs.access_token }}  # from google-github-actions/auth
+      - name: Build and push backend image  # tag with sha + prod
+        uses: docker/build-push-action@v6  # official buildx push
+        with:  # inputs for that action
+          context: ./backend  # Dockerfile lives here
+          push: true  # this is CD — unlike ci.yml which only builds
+          tags: |  # two tags for rollback / env tracking
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:prod

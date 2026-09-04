@@ -1,0 +1,56 @@
+# Advisory AI PR review — does NOT block merge.
+# Policy: docs/git-workflow.md + architecture.md decision #8.
+#
+# 0 custom review-bot code. Official action: anthropics/claude-code-action@v1
+# (install the GitHub App via `/install-github-app` in Claude Code first —
+# that step is interactive and cannot be done from this YAML).
+#
+# Keep this workflow's check non-required in branch protection. Required
+# gates stay in ci.yml. If this job fails (API outage, quota), merge must
+# still be possible.
+#
+# Never give this job credentials that can apply terraform or push images.
+
+name: PR review  # title shown in GitHub Actions — separate from the CI workflow
+
+on:  # which GitHub events start this workflow
+  pull_request:  # same event family as ci.yml, so both run on a PR
+    types: [opened, synchronize, reopened, ready_for_review]  # skip until a draft is marked ready
+
+concurrency:  # one review run per PR; a new push cancels the old review
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}  # one run per PR
+  cancel-in-progress: true  # stop the stale review when the branch updates
+
+permissions:  # least privilege — read code, post comments; no terraform / registry
+  contents: read  # read the PR tree
+  pull-requests: write  # post the review on the PR
+  issues: write  # some comment APIs use the issues permission
+  id-token: write  # OIDC token; some action auth paths require this
+
+jobs:  # one job: advisory review only
+  review:  # Claude Code Action — not a required check
+    name: Review  # label in the GitHub checks list
+    if: github.event.pull_request.draft == false  # official action also skips drafts
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    timeout-minutes: 15  # cap cost if the agent loops
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy the PR code onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+        with:  # inputs for that action
+          fetch-depth: 1  # this commit is enough; review reads files, not full git history
+      - name: Claude PR review  # official action — no custom bot code
+        uses: anthropics/claude-code-action@v1  # pin to a commit SHA later for supply-chain hygiene
+        with:  # inputs for that action
+          claude_code_oauth_token: ${{ secrets.CLAUDE_REVIEW }}  # GitHub secret name you created; value from `claude setup-token`
+          plugin_marketplaces: https://github.com/anthropics/claude-code.git  # official plugin source
+          plugins: code-review@claude-code-plugins  # same review skill as /install-github-app
+          prompt: |  # Nissim checklist on top of the official code-review skill
+            /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+
+            Extra checklist for this repo (docs/architecture.md, docs/git-workflow.md):
+            - 12-factor: config via env, no secrets in git, one process per concern
+            - LLM must not sit in the automatic actuator loop; decision_source on actuator_events must stay honest
+            - Rules+ML are one evaluation path; ML calibrates thresholds, does not decide
+            - No long-lived GCP JSON keys; deploy auth is Workload Identity Federation
+            - This review is advisory — never treat it as a required merge gate
+          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'  # inline comments only; no shell, no terraform, no image push
