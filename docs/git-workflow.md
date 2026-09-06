@@ -15,7 +15,8 @@
 
 ## Commit convention — Conventional Commits
 פורמט: `<type>: <description>` — `feat:`, `fix:`, `chore:`, `docs:`, `infra:`,
-`test:`. נאכף כ-check אוטומטי על כל PR (commitlint). מאפשר בעתיד
+`test:`. נאכף כ-check אוטומטי על כל PR (commitlint). אורך שורת ה-body לא מוגבל
+(GitHub עוטף לבד; כלל ה-100 תווים של conventional defaults כבוי). מאפשר בעתיד
 changelog/versioning אוטומטי מהיסטוריית ה-commits.
 
 ## PR checks (required status checks)

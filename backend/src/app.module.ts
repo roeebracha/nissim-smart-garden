@@ -6,8 +6,9 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from './prisma/prisma.module';
 import { DecisionModule } from './decision/decision.module';
+import { IngestionModule } from './ingestion/ingestion.module';
 
 @Module({
-  imports: [PrismaModule, DecisionModule],
+  imports: [PrismaModule, DecisionModule, IngestionModule],
 })
 export class AppModule {}
