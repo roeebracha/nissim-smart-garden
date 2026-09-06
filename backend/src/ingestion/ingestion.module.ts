@@ -3,9 +3,10 @@
 import { Module } from '@nestjs/common';
 import { DecisionModule } from '../decision/decision.module';
 import { IngestionService } from './ingestion.service';
+import { MqttSubscriber } from './mqtt.subscriber';
 
 @Module({
   imports: [DecisionModule],
-  providers: [IngestionService],
+  providers: [IngestionService, MqttSubscriber],
 })
 export class IngestionModule {}

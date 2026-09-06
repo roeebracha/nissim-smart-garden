@@ -294,6 +294,22 @@
   אותו היגיון כמו decision #3, ותיפתר במידה ותידרש דרך migration נקודתי או
   שדה נפרד לאותו actuator ספציפי, לא מתיחת ה-enum המשותף.
 
+### 16. MQTT client: `mqtt.js`, לא `@nestjs/microservices`
+- **הקשר**: Ingestion צריך להאזין ל-Mosquitto לפי חוזה decision #10
+  (`nissim/<device_id>/readings` + JSON). Nest מציע גם MQTT כ-transport של
+  microservices (`@MessagePattern`).
+- **החלטה**: חבילת `mqtt` (mqtt.js) כ-client רגיל בתוך `IngestionModule`.
+  ה-subscriber מתחבר ב-`OnModuleInit`, נרשם ל-`nissim/+/readings`, מעביר
+  `deviceId` (מקטע ה-topic) + payload ל-`IngestionService.ingest()`, וסוגר
+  ב-`OnModuleDestroy`. ה-mock publisher הוא סקריפט נפרד (לא אותו process)
+  שעושה `publish` לאותו broker — אותו חוזה שה-ESP32 ישתמש בו.
+- **נימוק**: `@nestjs/microservices` MQTT מיועד ל-Nest↔Nest (pattern +
+  serializer של המסגרת), לא למכשיר IoT שמפרסם topic+bytes. mqtt.js הוא
+  החוזה עצמו בלי שכבה שמסתירה topic/payload. אותו pattern כמו decision
+  #5 / #11 — לחשוף את הזרימה, לא להחביא אותה ב-runtime. חיבור/reconnect
+  שייכים ל-subscriber (lifecycle של Prisma, decision #14), לא ל-HTTP
+  adapter.
+
 ## סכימת DB — קונספט (טרם ממומש)
 
 | טבלה | תפקיד |
