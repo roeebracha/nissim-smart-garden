@@ -3,6 +3,8 @@
 export default {
   extends: ['@commitlint/config-conventional'],
   rules: {
+    // GitHub wraps commit bodies; a 100-char line cap is leftover terminal habit.
+    'body-max-line-length': [0],
     'type-enum': [
       2,
       'always',

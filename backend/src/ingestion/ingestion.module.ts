@@ -1,12 +1,11 @@
-// Ingestion module — owns the MQTT subscription that receives sensor readings
-// from the ESP32 (or, for now, the mock publisher — see docs/architecture.md
-// decision #10 for the topic/payload contract).
-//
-// Needs DecisionModule imported so IngestionService can inject DecisionService
-// directly (decision #11 — no event emitter).
-//
-// Empty for now - fill in providers/imports once IngestionService exists.
+// Ingestion module — MQTT subscriber + IngestionService.
+// Imports DecisionModule so this service can inject DecisionService (decision #11).
 import { Module } from '@nestjs/common';
+import { DecisionModule } from '../decision/decision.module';
+import { IngestionService } from './ingestion.service';
 
-@Module({})
+@Module({
+  imports: [DecisionModule],
+  providers: [IngestionService],
+})
 export class IngestionModule {}
