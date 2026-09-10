@@ -165,6 +165,7 @@
     ולעקרונות שכבר מתועדים ב-`architecture.md`/`git-workflow.md` (למשל
     separation of concerns בשכבות ה-AI, decision_source על actuator_events).
   - **Gate status**: **advisory בלבד** — לא required check (ראה `git-workflow.md`).
+    **בוטל ב-decision #17** — ה-workflow נמחק; הרשומה נשארת כהיסטוריה.
 - **נימוק**: מול השיקול הלימודי (learning-approach.md) — הכתיבה של בוט custom
   לא הייתה מתרגלת "לוגיקת ליבה" של הפרויקט (כמו decision #5, שבו agent loop
   ידני משרת ישירות את שכבת ה-LLM המתוכננת), אלא היה מדובר בכלי-עזר סביבתי
@@ -309,6 +310,17 @@
   #5 / #11 — לחשוף את הזרימה, לא להחביא אותה ב-runtime. חיבור/reconnect
   שייכים ל-subscriber (lifecycle של Prisma, decision #14), לא ל-HTTP
   adapter.
+
+### 17. בלי workflow של Claude PR review
+- **הקשר**: decision #8 הוסיף `pr-review.yml` כ-check מייעץ. בפועל ה-action
+  נכשל באופן קבוע (יציאה מיידית, בלי תגובה על ה-PR). על PR של אדם אחד זה
+  נראה כמו gate אדום גם כש-CI האמיתי ירוק.
+- **החלטה**: מוחקים את `.github/workflows/pr-review.yml`. ה-gate נשאר רק
+  `ci.yml` (lint / typecheck / tests / docker / terraform / commitlint).
+  Review אנושי/Claude נשאר ידני בצ'אט כשצריך, לא כ-check ב-GitHub.
+- **נימוק**: check אדום בלי ערך review מבלבל יותר מאשר חוסר בוט. זה לא
+  סותר את #8 על "לא לכתוב בוט custom" — פשוט אין גם את ה-action הרשמי
+  כל עוד הוא לא רץ יציב. אפשר להחזיר אם ה-action יתייצב.
 
 ## סכימת DB — קונספט (טרם ממומש)
 

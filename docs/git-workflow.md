@@ -41,16 +41,6 @@
   "skipped" ב-PRs שלא נוגעים ב-`infra/` ויחסום merge.
 - commitlint — Conventional Commits, כולל type `infra` (`commitlint.config.mjs`)
 
-## AI review bot — `anthropics/claude-code-action`, advisory בלבד
-GitHub Actions workflow נוסף (`on: pull_request`), רץ **במקביל** לצ'קים
-למעלה אבל **לא חוסם merge** — תוצאת ה-check הזה לא נכנסת לרשימת ה-required
-checks. הרציונל המלא (כולל למה לא נבנה בוט custom) ב-`architecture.md`
-decision #8. בקצרה:
-- `anthropics/claude-code-action@v1` — action רשמי, לא קוד custom.
-- התקנה: `/install-github-app` מטרמינל Claude Code (דורש אישור אינטראקטיבי
-  ידני — לא ניתן להריץ מ-session לא-אינטראקטיבי).
-- checklist מותאם אישית ל-Nissim (12-factor + עקרונות מ-`architecture.md`).
-
 ## Approval policy — required checks בלבד, בלי human approval פורמלי
 זה **פרויקט של אדם אחד** — GitHub לא סופר אישור של מחבר ה-PR לעצמו לכיוון
 דרישת "require approvals", כך שדרישת אישור אנושי פורמלית תיתקע פרויקט סולו.
@@ -83,10 +73,9 @@ PR נפתח
 - Environments (`dev`, `prod`) + required reviewers על `prod` —
   `github_repository_environment`
 - GitHub Actions — רק תחת `.github/workflows/` (GitHub לא מריץ YAML מתיקייה
-  אחרת). שלושה קבצים, לפי אחריות:
+  אחרת). שני קבצים, לפי אחריות:
   - `.github/workflows/ci.yml` — PR checks (lint/typecheck/test/docker/
     commitlint/terraform fmt+validate; plan יתווסף אחרי WIF + קונפיג סביבות)
   - `.github/workflows/deploy.yml` — dev מכל branch (+ `workflow_dispatch`);
     prod רק מ-`main` עם GitHub Environment + required reviewer
-  - `.github/workflows/pr-review.yml` — `anthropics/claude-code-action`,
-    advisory בלבד (לא required check)
+  אין `pr-review.yml` (decision #17).
