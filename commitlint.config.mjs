@@ -3,8 +3,11 @@
 export default {
   extends: ['@commitlint/config-conventional'],
   rules: {
-    // GitHub wraps commit bodies; a 100-char line cap is leftover terminal habit.
+    // GitHub wraps text; a 100-char line cap is leftover terminal habit.
+    // Keep the subject short. Body and footer may be long (why / context).
+    // A Co-authored-by trailer makes commitlint treat the body as footer.
     'body-max-line-length': [0],
+    'footer-max-line-length': [0],
     'type-enum': [
       2,
       'always',

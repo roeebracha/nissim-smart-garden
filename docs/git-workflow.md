@@ -15,9 +15,18 @@
 
 ## Commit convention — Conventional Commits
 פורמט: `<type>: <description>` — `feat:`, `fix:`, `chore:`, `docs:`, `infra:`,
-`test:`. נאכף כ-check אוטומטי על כל PR (commitlint). אורך שורת ה-body לא מוגבל
-(GitHub עוטף לבד; כלל ה-100 תווים של conventional defaults כבוי). מאפשר בעתיד
-changelog/versioning אוטומטי מהיסטוריית ה-commits.
+`test:`. נאכף כ-check אוטומטי על כל PR (commitlint).
+
+- **Subject** — שורה אחת קצרה (type + מה השתנה). זה מה שנכנס ל-changelog.
+- **Body** — רצוי, ויכול להיות ארוך: *למה* (החלטה, trade-off, מה לא עושים).
+  זה הקונטקסט ל-`git log` ולאנשים/AI שחוזרים להיסטוריה. שבירת שורות
+  נוחה לקריאה, לא חובה בשביל CI.
+- **Footer** — אופציונלי (`Fixes #12`). בלי `Co-authored-by` של כלי AI —
+  זה רעש בהיסטוריה ולפעמים גורם ל-commitlint לסווג את ה-body כ-footer.
+
+אורך שורות ב-body וב-footer לא מוגבל (`body-max-line-length` ו-
+`footer-max-line-length` כבויים ב-`commitlint.config.mjs`). GitHub עוטף
+לבד. מאפשר בעתיד changelog/versioning אוטומטי מהיסטוריית ה-commits.
 
 ## PR checks (required status checks)
 כל PR חייב לעבור לפני merge (`.github/workflows/ci.yml`):
