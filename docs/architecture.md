@@ -322,6 +322,40 @@
   סותר את #8 על "לא לכתוב בוט custom" — פשוט אין גם את ה-action הרשמי
   כל עוד הוא לא רץ יציב. אפשר להחזיר אם ה-action יתייצב.
 
+### 18. סדר הבנייה הנותר: עמוד שדרה של קוד / AI / infra — הקצה אופציונלי
+- **הקשר**: שלבי 1–4 וחלק מ-7 ב-roadmap המקורי כבר קיימים (Compose, Prisma,
+  ingestion+MQTT subscribe, Decision, CI, שלד Terraform). המטרה הלימודית
+  היא ארכיטקטורת הבקאנד, DB, ML/LLM, ואינפרא — לא firmware או Mosquitto
+  מעבר לצינור שכבר עובד.
+- **החלטה**: הסדר הנותר הוא: (1) Operation דק, (2) ML batch על
+  `automation_rules`, (3) LLM + טבלת suggestions, (4) API דק לאישור הצעה,
+  (5) משאבי GCP אמיתיים + WIF/plan/deploy, (6) frontend רק אם נרצה.
+  firmware, ack/`reportedState`, watchdog, RAG — מחוץ לסcope אלא אם נחליט
+  אחרת.
+- **נימוק**: LLM ו-ML תלויים בדאטה ובשכבות ברורות, לא ב-ESP32. Operation
+  דק סוגר את הדלת היחידה לעולם הפיזי (decision #2) ונותן `actuator_events`
+  להסבר אחר כך. Infra אמיתי מגיע אחרי שיש מה לפרוס. אותו עיקרון כמו
+  decision #3 — לא להנדס את הקצה לפני שהוא נדרש.
+
+### 19. Operation דק + לקוח MQTT משותף ל-subscribe ול-publish
+- **הקשר**: Decision כבר מחשב `nextState` ועוצר ב-TODO. קריאות עולות על
+  חיבור `mqtt.js` אחד (decision #16). צריך גם לשלוח פקודה, בלי שיעור IoT.
+- **החלטה**:
+  - `OperationService.requestActuation` הוא הדלת היחידה: safety hardcoded
+    (מקס' זמן `on`, מינ' מרווח) → עדכון `desiredState`/`desiredSince` →
+    publish → שורת `actuator_events`. חסימת safety = לוג בלבד, בלי DB
+    ובלי MQTT. `reportedState` לא מתעדכן כאן.
+  - Decision (ואחר כך API ידני) מזריק את Operation וקורא `await` — אותו
+    pattern כמו decision #11. Operation לא מייבא את Decision.
+  - חוזה פקודה: `nissim/<device_id>/commands` + `{ actuator, state }` —
+    שם לוגי כמו decision #10, `state` הוא `on`/`off`.
+  - חיבור `mqtt.js` **אחד** (מודול infra משותף): subscribe לקריאות +
+    publish לפקודות. לא לקוח שני ב-Operation.
+- **נימוק**: שכבת הבטיחות חייבת לשבת ברגע ההפעלה, לא ב-Decision, כדי
+  שידני בעתיד יעבור באותה דלת. לקוח אחד = lifecycle אחד מול הברוקר,
+  כמו Prisma כ-infra יחיד (decision #14). החוזה משקף את ה-readings כדי
+  שה-firmware העתידי (אם בכלל) ידבר באותה שפה בלי REST זמני.
+
 ## סכימת DB — קונספט (טרם ממומש)
 
 | טבלה | תפקיד |
@@ -338,18 +372,20 @@
 נקודת עיצוב מרכזית: `decision_source` על כל actuator_event — כדי שתמיד אפשר יהיה
 להסביר "למה הפומפה נדלקה", וכדי לשמור על ההפרדה בין שכבות ה-AI גם ברמת הדאטה.
 
-## Roadmap / סדר בנייה — טיוטה, בדיון
+## Roadmap / סדר בנייה (decision #18)
 
-1. שלד repo + Docker Compose לסביבה מקומית (Postgres + Mosquitto + backend stub)
-2. Terraform — תשתית GCP בסיסית (Cloud SQL, networking, Artifact Registry)
-3. CI/CD — GitHub Actions (build/test/push images, terraform plan/apply)
-4. Backend skeleton — API + DB migrations + ingestion endpoint (מכשיר וירטואלי/mock)
-5. Edge — firmware skeleton (ESP32), חיבור MQTT אמיתי
-6. Frontend skeleton — דשבורד קורא מה-API
-7. Safety/automation rules layer
-8. ML layer
-9. LLM layer (insights + chat + function calling, agent loop ידני מול Claude API — כלים read-only/הצעה בלבד)
-10. (אופציונלי) RAG — knowledge base של טיפול בצמחים
+**כבר קיים:** Compose (Postgres + Mosquitto), Prisma + migrations, Nest,
+ingestion + MQTT subscribe, Decision (hysteresis), CI, שלד Terraform.
+
+**נותר — בסדר הזה:**
+1. Operation דק + לקוח MQTT משותף (decision #19) — הבראנץ' הנוכחי
+2. ML batch — מעדכן thresholds ב-`automation_rules` (`updatedBy: ml`)
+3. LLM module + טבלת `suggestions` (pending בלבד)
+4. API דק — אישור אדם ל-suggestion (לא דשבורד)
+5. Infra GCP אמיתי — משאב ראשון, אחר כך WIF / plan ב-CI / deploy
+6. Frontend — אופציונלי
+
+**מחוץ לסcope אלא אם יוחלט אחרת:** firmware, ack/`reportedState`, watchdog, RAG.
 
 ## כלים וטכנולוגיות — בדיון, ראה שיחה
 Docker, Terraform, GCP, GitHub Actions, Node.js/TypeScript + NestJS + Prisma +

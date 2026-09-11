@@ -1,51 +1,24 @@
-// MqttSubscriber — MQTT client for readings (decision #10, #16).
-// Owns connect / subscribe / close. Does not validate or save — that is ingest().
-import {
-  Injectable,
-  Logger,
-  OnModuleDestroy,
-  OnModuleInit,
-} from '@nestjs/common';
-import mqtt, { type MqttClient } from 'mqtt';
+// MqttSubscriber — readings handler only (decisions #10, #16, #19).
+// Connect / close live on MqttConnection. This file only maps topic → ingest().
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { MqttConnection } from '../mqtt/mqtt.client';
 import { IngestionService } from './ingestion.service';
 
 const READINGS_TOPIC = 'nissim/+/readings';
 
 @Injectable()
-export class MqttSubscriber implements OnModuleInit, OnModuleDestroy {
+export class MqttSubscriber implements OnModuleInit {
   private readonly logger = new Logger(MqttSubscriber.name);
-  private client: MqttClient | undefined;
 
-  constructor(private readonly ingestion: IngestionService) {}
+  constructor(
+    private readonly mqtt: MqttConnection,
+    private readonly ingestion: IngestionService,
+  ) {}
 
-  onModuleInit(): void {
-    const host = process.env.MQTT_BROKER_HOST;
-    const port = process.env.MQTT_BROKER_PORT;
-    if (!host || !port) {
-      throw new Error('MQTT_BROKER_HOST and MQTT_BROKER_PORT must be set');
-    }
-
-    this.client = mqtt.connect(`mqtt://${host}:${port}`);
-
-    this.client.on('connect', () => {
-      this.client?.subscribe(READINGS_TOPIC, (err) => {
-        if (err) {
-          this.logger.error(`Failed to subscribe to ${READINGS_TOPIC}`, err);
-        }
-      });
-    });
-
-    this.client.on('error', (err) => {
-      this.logger.error('MQTT client error', err);
-    });
-
-    this.client.on('message', (topic, payload) => {
-      void this.handleMessage(topic, payload);
-    });
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    await this.client?.endAsync();
+  async onModuleInit(): Promise<void> {
+    await this.mqtt.subscribe(READINGS_TOPIC, (topic, payload) =>
+      this.handleMessage(topic, payload),
+    );
   }
 
   private async handleMessage(topic: string, payload: Buffer): Promise<void> {
