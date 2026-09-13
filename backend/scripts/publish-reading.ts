@@ -9,4 +9,5 @@
 // device_id must already exist as Device.id; sensor must exist as Sensor.name
 // on that device, or ingest() will reject the message.
 //
-// Add the `mqtt` package when you implement; one publish then exit.
+// mqtt is already in backend/package.json. One publish then exit when you
+// implement this script.
