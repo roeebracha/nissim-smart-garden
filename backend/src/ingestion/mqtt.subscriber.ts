@@ -27,7 +27,10 @@ export class MqttSubscriber implements OnModuleInit {
       const parsed = parseJsonPayload(payload);
       await this.ingestion.ingest(deviceId, parsed);
     } catch (err) {
-      this.logger.error(`Dropped reading on ${topic}`, err);
+      this.logger.error(
+        `Dropped reading on ${topic}`,
+        err instanceof Error ? (err.stack ?? err.message) : String(err),
+      );
     }
   }
 }

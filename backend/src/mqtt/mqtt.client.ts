@@ -24,17 +24,17 @@ export class MqttConnection implements OnModuleInit, OnModuleDestroy {
   private client: MqttClient | undefined;
   private readonly subscriptions: Subscription[] = [];
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     const host = process.env.MQTT_BROKER_HOST;
     const port = process.env.MQTT_BROKER_PORT;
     if (!host || !port) {
       throw new Error('MQTT_BROKER_HOST and MQTT_BROKER_PORT must be set');
     }
 
-    this.client = mqtt.connect(`mqtt://${host}:${port}`);
+    this.client = await mqtt.connectAsync(`mqtt://${host}:${port}`);
 
     this.client.on('error', (err) => {
-      this.logger.error('MQTT client error', err);
+      this.logger.error('MQTT client error', errorStack(err));
     });
 
     this.client.on('message', (topic, payload) => {
@@ -70,10 +70,14 @@ export class MqttConnection implements OnModuleInit, OnModuleDestroy {
         continue;
       }
       void Promise.resolve(handler(topic, payload)).catch((err: unknown) => {
-        this.logger.error(`MQTT handler failed on ${topic}`, err);
+        this.logger.error(`MQTT handler failed on ${topic}`, errorStack(err));
       });
     }
   }
+}
+
+function errorStack(err: unknown): string {
+  return err instanceof Error ? (err.stack ?? err.message) : String(err);
 }
 
 function topicMatches(filter: string, topic: string): boolean {
