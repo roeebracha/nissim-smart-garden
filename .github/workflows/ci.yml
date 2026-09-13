@@ -1,5 +1,5 @@
 # Required PR checks. Policy: docs/git-workflow.md.
-# Advisory AI review is a different workflow (pr-review.yml) and must not be required.
+# Required PR gates only. No separate AI review workflow (decision #17).
 
 name: CI  # title shown in GitHub Actions
 

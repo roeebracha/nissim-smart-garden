@@ -15,9 +15,18 @@
 
 ## Commit convention — Conventional Commits
 פורמט: `<type>: <description>` — `feat:`, `fix:`, `chore:`, `docs:`, `infra:`,
-`test:`. נאכף כ-check אוטומטי על כל PR (commitlint). אורך שורת ה-body לא מוגבל
-(GitHub עוטף לבד; כלל ה-100 תווים של conventional defaults כבוי). מאפשר בעתיד
-changelog/versioning אוטומטי מהיסטוריית ה-commits.
+`test:`. נאכף כ-check אוטומטי על כל PR (commitlint).
+
+- **Subject** — שורה אחת קצרה (type + מה השתנה). זה מה שנכנס ל-changelog.
+- **Body** — רצוי, ויכול להיות ארוך: *למה* (החלטה, trade-off, מה לא עושים).
+  זה הקונטקסט ל-`git log` ולאנשים/AI שחוזרים להיסטוריה. שבירת שורות
+  נוחה לקריאה, לא חובה בשביל CI.
+- **Footer** — אופציונלי (`Fixes #12`). בלי `Co-authored-by` של כלי AI —
+  זה רעש בהיסטוריה ולפעמים גורם ל-commitlint לסווג את ה-body כ-footer.
+
+אורך שורות ב-body וב-footer לא מוגבל (`body-max-line-length` ו-
+`footer-max-line-length` כבויים ב-`commitlint.config.mjs`). GitHub עוטף
+לבד. מאפשר בעתיד changelog/versioning אוטומטי מהיסטוריית ה-commits.
 
 ## PR checks (required status checks)
 כל PR חייב לעבור לפני merge (`.github/workflows/ci.yml`):
@@ -31,16 +40,6 @@ changelog/versioning אוטומטי מהיסטוריית ה-commits.
   ה-job רץ בכל PR (זול) — לא `paths:` filter — כדי ש-required check לא יישאר
   "skipped" ב-PRs שלא נוגעים ב-`infra/` ויחסום merge.
 - commitlint — Conventional Commits, כולל type `infra` (`commitlint.config.mjs`)
-
-## AI review bot — `anthropics/claude-code-action`, advisory בלבד
-GitHub Actions workflow נוסף (`on: pull_request`), רץ **במקביל** לצ'קים
-למעלה אבל **לא חוסם merge** — תוצאת ה-check הזה לא נכנסת לרשימת ה-required
-checks. הרציונל המלא (כולל למה לא נבנה בוט custom) ב-`architecture.md`
-decision #8. בקצרה:
-- `anthropics/claude-code-action@v1` — action רשמי, לא קוד custom.
-- התקנה: `/install-github-app` מטרמינל Claude Code (דורש אישור אינטראקטיבי
-  ידני — לא ניתן להריץ מ-session לא-אינטראקטיבי).
-- checklist מותאם אישית ל-Nissim (12-factor + עקרונות מ-`architecture.md`).
 
 ## Approval policy — required checks בלבד, בלי human approval פורמלי
 זה **פרויקט של אדם אחד** — GitHub לא סופר אישור של מחבר ה-PR לעצמו לכיוון
@@ -74,10 +73,9 @@ PR נפתח
 - Environments (`dev`, `prod`) + required reviewers על `prod` —
   `github_repository_environment`
 - GitHub Actions — רק תחת `.github/workflows/` (GitHub לא מריץ YAML מתיקייה
-  אחרת). שלושה קבצים, לפי אחריות:
+  אחרת). שני קבצים, לפי אחריות:
   - `.github/workflows/ci.yml` — PR checks (lint/typecheck/test/docker/
     commitlint/terraform fmt+validate; plan יתווסף אחרי WIF + קונפיג סביבות)
   - `.github/workflows/deploy.yml` — dev מכל branch (+ `workflow_dispatch`);
     prod רק מ-`main` עם GitHub Environment + required reviewer
-  - `.github/workflows/pr-review.yml` — `anthropics/claude-code-action`,
-    advisory בלבד (לא required check)
+  אין `pr-review.yml` (decision #17).

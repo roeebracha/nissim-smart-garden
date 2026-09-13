@@ -5,10 +5,12 @@
 // This is just the minimal root Nest requires to boot.
 import { Module } from '@nestjs/common';
 import { PrismaModule } from './prisma/prisma.module';
+import { MqttModule } from './mqtt/mqtt.module';
 import { DecisionModule } from './decision/decision.module';
 import { IngestionModule } from './ingestion/ingestion.module';
 
 @Module({
-  imports: [PrismaModule, DecisionModule, IngestionModule],
+  imports: [PrismaModule, MqttModule, DecisionModule, IngestionModule],
+  // Next: OperationModule — see decision #19.
 })
 export class AppModule {}

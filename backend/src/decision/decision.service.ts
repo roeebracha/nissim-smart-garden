@@ -65,7 +65,8 @@ export class DecisionService {
       actuator.desiredState,
     );
     if (nextState !== actuator.desiredState) {
-      // TODO: OperationModule
+      // Hand off to OperationService.requestActuation (decision #19).
+      // Inject OperationService here — same await as ingest → evaluate.
     }
   }
 }

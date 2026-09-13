@@ -165,6 +165,7 @@
     ולעקרונות שכבר מתועדים ב-`architecture.md`/`git-workflow.md` (למשל
     separation of concerns בשכבות ה-AI, decision_source על actuator_events).
   - **Gate status**: **advisory בלבד** — לא required check (ראה `git-workflow.md`).
+    **בוטל ב-decision #17** — ה-workflow נמחק; הרשומה נשארת כהיסטוריה.
 - **נימוק**: מול השיקול הלימודי (learning-approach.md) — הכתיבה של בוט custom
   לא הייתה מתרגלת "לוגיקת ליבה" של הפרויקט (כמו decision #5, שבו agent loop
   ידני משרת ישירות את שכבת ה-LLM המתוכננת), אלא היה מדובר בכלי-עזר סביבתי
@@ -294,6 +295,67 @@
   אותו היגיון כמו decision #3, ותיפתר במידה ותידרש דרך migration נקודתי או
   שדה נפרד לאותו actuator ספציפי, לא מתיחת ה-enum המשותף.
 
+### 16. MQTT client: `mqtt.js`, לא `@nestjs/microservices`
+- **הקשר**: Ingestion צריך להאזין ל-Mosquitto לפי חוזה decision #10
+  (`nissim/<device_id>/readings` + JSON). Nest מציע גם MQTT כ-transport של
+  microservices (`@MessagePattern`).
+- **החלטה**: חבילת `mqtt` (mqtt.js) כ-client רגיל בתוך `IngestionModule`.
+  ה-subscriber מתחבר ב-`OnModuleInit`, נרשם ל-`nissim/+/readings`, מעביר
+  `deviceId` (מקטע ה-topic) + payload ל-`IngestionService.ingest()`, וסוגר
+  ב-`OnModuleDestroy`. ה-mock publisher הוא סקריפט נפרד (לא אותו process)
+  שעושה `publish` לאותו broker — אותו חוזה שה-ESP32 ישתמש בו.
+- **נימוק**: `@nestjs/microservices` MQTT מיועד ל-Nest↔Nest (pattern +
+  serializer של המסגרת), לא למכשיר IoT שמפרסם topic+bytes. mqtt.js הוא
+  החוזה עצמו בלי שכבה שמסתירה topic/payload. אותו pattern כמו decision
+  #5 / #11 — לחשוף את הזרימה, לא להחביא אותה ב-runtime. חיבור/reconnect
+  שייכים ל-subscriber (lifecycle של Prisma, decision #14), לא ל-HTTP
+  adapter.
+
+### 17. בלי workflow של Claude PR review
+- **הקשר**: decision #8 הוסיף `pr-review.yml` כ-check מייעץ. בפועל ה-action
+  נכשל באופן קבוע (יציאה מיידית, בלי תגובה על ה-PR). על PR של אדם אחד זה
+  נראה כמו gate אדום גם כש-CI האמיתי ירוק.
+- **החלטה**: מוחקים את `.github/workflows/pr-review.yml`. ה-gate נשאר רק
+  `ci.yml` (lint / typecheck / tests / docker / terraform / commitlint).
+  Review אנושי/Claude נשאר ידני בצ'אט כשצריך, לא כ-check ב-GitHub.
+- **נימוק**: check אדום בלי ערך review מבלבל יותר מאשר חוסר בוט. זה לא
+  סותר את #8 על "לא לכתוב בוט custom" — פשוט אין גם את ה-action הרשמי
+  כל עוד הוא לא רץ יציב. אפשר להחזיר אם ה-action יתייצב.
+
+### 18. סדר הבנייה הנותר: עמוד שדרה של קוד / AI / infra — הקצה אופציונלי
+- **הקשר**: שלבי 1–4 וחלק מ-7 ב-roadmap המקורי כבר קיימים (Compose, Prisma,
+  ingestion+MQTT subscribe, Decision, CI, שלד Terraform). המטרה הלימודית
+  היא ארכיטקטורת הבקאנד, DB, ML/LLM, ואינפרא — לא firmware או Mosquitto
+  מעבר לצינור שכבר עובד.
+- **החלטה**: הסדר הנותר הוא: (1) Operation דק, (2) ML batch על
+  `automation_rules`, (3) LLM + טבלת suggestions, (4) API דק לאישור הצעה,
+  (5) משאבי GCP אמיתיים + WIF/plan/deploy, (6) frontend רק אם נרצה.
+  firmware, ack/`reportedState`, watchdog, RAG — מחוץ לסcope אלא אם נחליט
+  אחרת.
+- **נימוק**: LLM ו-ML תלויים בדאטה ובשכבות ברורות, לא ב-ESP32. Operation
+  דק סוגר את הדלת היחידה לעולם הפיזי (decision #2) ונותן `actuator_events`
+  להסבר אחר כך. Infra אמיתי מגיע אחרי שיש מה לפרוס. אותו עיקרון כמו
+  decision #3 — לא להנדס את הקצה לפני שהוא נדרש.
+
+### 19. Operation דק + לקוח MQTT משותף ל-subscribe ול-publish
+- **הקשר**: Decision כבר מחשב `nextState` ועוצר ב-TODO. קריאות עולות על
+  חיבור `mqtt.js` אחד (decision #16). צריך גם לשלוח פקודה, בלי שיעור IoT.
+- **החלטה**:
+  - `OperationService.requestActuation` הוא הדלת היחידה: safety hardcoded
+    (מקס' זמן `on`, מינ' מרווח) → עדכון `desiredState`/`desiredSince` →
+    publish → שורת `actuator_events`. חסימת safety = לוג בלבד, בלי DB
+    ובלי MQTT. `reportedState` לא מתעדכן כאן.
+  - Decision (ואחר כך API ידני) מזריק את Operation וקורא `await` — אותו
+    pattern כמו decision #11. Operation לא מייבא את Decision.
+  - חוזה פקודה: `nissim/<device_id>/commands` + `{ actuator, state }` —
+    שם לוגי כמו decision #10, `state` הוא `on`/`off`.
+  - חיבור `mqtt.js` **אחד** (מודול infra משותף): subscribe לקריאות +
+    publish לפקודות. לא לקוח שני ב-Operation.
+- **נימוק**: שכבת הבטיחות חייבת לשבת ברגע ההפעלה, לא ב-Decision, כדי
+  שידני בעתיד יעבור באותה דלת. לקוח אחד = lifecycle אחד מול הברוקר,
+  כמו Prisma כ-infra יחיד (decision #14). החוזה משקף את ה-readings כדי
+  שה-firmware העתידי (אם בכלל) ידבר באותה שפה בלי REST זמני.
+
 ## סכימת DB — קונספט (טרם ממומש)
 
 | טבלה | תפקיד |
@@ -310,18 +372,20 @@
 נקודת עיצוב מרכזית: `decision_source` על כל actuator_event — כדי שתמיד אפשר יהיה
 להסביר "למה הפומפה נדלקה", וכדי לשמור על ההפרדה בין שכבות ה-AI גם ברמת הדאטה.
 
-## Roadmap / סדר בנייה — טיוטה, בדיון
+## Roadmap / סדר בנייה (decision #18)
 
-1. שלד repo + Docker Compose לסביבה מקומית (Postgres + Mosquitto + backend stub)
-2. Terraform — תשתית GCP בסיסית (Cloud SQL, networking, Artifact Registry)
-3. CI/CD — GitHub Actions (build/test/push images, terraform plan/apply)
-4. Backend skeleton — API + DB migrations + ingestion endpoint (מכשיר וירטואלי/mock)
-5. Edge — firmware skeleton (ESP32), חיבור MQTT אמיתי
-6. Frontend skeleton — דשבורד קורא מה-API
-7. Safety/automation rules layer
-8. ML layer
-9. LLM layer (insights + chat + function calling, agent loop ידני מול Claude API — כלים read-only/הצעה בלבד)
-10. (אופציונלי) RAG — knowledge base של טיפול בצמחים
+**כבר קיים:** Compose (Postgres + Mosquitto), Prisma + migrations, Nest,
+ingestion + MQTT subscribe, Decision (hysteresis), CI, שלד Terraform.
+
+**נותר — בסדר הזה:**
+1. Operation דק + לקוח MQTT משותף (decision #19) — הבראנץ' הנוכחי
+2. ML batch — מעדכן thresholds ב-`automation_rules` (`updatedBy: ml`)
+3. LLM module + טבלת `suggestions` (pending בלבד)
+4. API דק — אישור אדם ל-suggestion (לא דשבורד)
+5. Infra GCP אמיתי — משאב ראשון, אחר כך WIF / plan ב-CI / deploy
+6. Frontend — אופציונלי
+
+**מחוץ לסcope אלא אם יוחלט אחרת:** firmware, ack/`reportedState`, watchdog, RAG.
 
 ## כלים וטכנולוגיות — בדיון, ראה שיחה
 Docker, Terraform, GCP, GitHub Actions, Node.js/TypeScript + NestJS + Prisma +
