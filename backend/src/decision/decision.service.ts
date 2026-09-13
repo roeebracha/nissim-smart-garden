@@ -7,6 +7,7 @@ import {
   SensorReading,
   ThresholdOperator,
 } from '../../generated/prisma/client';
+import { OperationService } from '../operation/operation.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 // Ingestion loads the reading with its sensor so Decision can match rules
@@ -21,7 +22,10 @@ type ReadingWithSensor = SensorReading & {
 
 @Injectable()
 export class DecisionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly operation: OperationService,
+  ) {}
 
   // reading → matching rules → evaluate each
   async evaluate(reading: ReadingWithSensor): Promise<void> {
@@ -65,8 +69,11 @@ export class DecisionService {
       actuator.desiredState,
     );
     if (nextState !== actuator.desiredState) {
-      // Hand off to OperationService.requestActuation (decision #19).
-      // Inject OperationService here — same await as ingest → evaluate.
+      await this.operation.requestActuation({
+        actuator,
+        nextState,
+        source: 'rule',
+      });
     }
   }
 }

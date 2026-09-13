@@ -8,9 +8,15 @@ import { PrismaModule } from './prisma/prisma.module';
 import { MqttModule } from './mqtt/mqtt.module';
 import { DecisionModule } from './decision/decision.module';
 import { IngestionModule } from './ingestion/ingestion.module';
+import { OperationModule } from './operation/operation.module';
 
 @Module({
-  imports: [PrismaModule, MqttModule, DecisionModule, IngestionModule],
-  // Next: OperationModule — see decision #19.
+  imports: [
+    PrismaModule,
+    MqttModule,
+    DecisionModule,
+    IngestionModule,
+    OperationModule,
+  ],
 })
 export class AppModule {}
