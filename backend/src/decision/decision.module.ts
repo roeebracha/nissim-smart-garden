@@ -4,9 +4,11 @@
 // Exports DecisionService so IngestionModule can inject it directly
 // (decision #11).
 import { Module } from '@nestjs/common';
+import { OperationModule } from '../operation/operation.module';
 import { DecisionService } from './decision.service';
 
 @Module({
+  imports: [OperationModule],
   providers: [DecisionService],
   exports: [DecisionService],
 })
