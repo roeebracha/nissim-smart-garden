@@ -356,6 +356,32 @@
   כמו Prisma כ-infra יחיד (decision #14). החוזה משקף את ה-readings כדי
   שה-firmware העתידי (אם בכלל) ידבר באותה שפה בלי REST זמני.
 
+### 20. ML batch: כיול אחוזונים בתוך ה-backend, לא מודל שמפעיל אקטואטור
+- **הקשר**: decision #9 קבע ש-ML רק מעדכן thresholds ב-`automation_rules`.
+  נשאר לקבוע איפה זה רץ, איזה אלגוריתם v1, ומה אסור לו לגעת.
+- **החלטה**:
+  - **גבול**: `MlModule` בתוך אותו process/קונטיינר `backend` (cron דרך
+    `@nestjs/schedule`). לא Compose service רביעי ולא microservice.
+    Ingestion / Decision / Operation לא מייבאים את ML.
+  - **אלגוריתם v1**: unsupervised — אחוזונים על קריאות 7 הימים האחרונים
+    לכל rule פעיל (`planterId` + `sensorType`). בלי ספריית ML. בלי
+    `actuator_events`, אור/טמפ', או רגרסיה.
+  - **דילוג**: אם מספר הדגימות `< MIN_SAMPLES` — לא כותבים (cold start /
+    השאר seed). ניחוש על אפס דאטה גרוע יותר מה-seed.
+  - **כתיבה**: `onThreshold` / `offThreshold` + `updatedBy: ml`. כפה סדר
+    hysteresis לפי `operator`, פער מינימלי, clamp לטווח בטוח לפי סוג
+    חיישן, וצעד מקסימלי מול הערכים הנוכחיים.
+  - **אסור**: קריאה ל-`requestActuation` / הזרקת Operation. `decision_source`
+    על אירועים נשאר `'rule'`.
+- **נימוק**: ה-job הוא מיון של כמה אלפי שורות — לא אימון GPU ולא שפה
+  אחרת, אז process נפרד הוא over-engineering (אותו עיקרון כמו decision
+  #3). בידוד בקוד מספיק: אם ה-cron נכשל, ההסקה ממשיכה עם הספים הישנים.
+  אחוזונים שקופים ועמידים לחריגות; אין תוויות ל-supervised. Closed-loop
+  מודע — לומדים את העולם תחת המדיניות הנוכחית, לא "אמת בוטנית".
+- **ברירות מומלצות למימוש** (ניתן לכוון, לא סכימה): `WINDOW_DAYS=7`,
+  `MIN_SAMPLES=50`, `MIN_GAP=5`, max step ~10 ליחידות החיישן, cron לילי.
+  ל-`less_than`: on ≈ אחוזון נמוך, off ≈ גבוה יותר. ל-`greater_than`: הפוך.
+
 ## סכימת DB — קונספט (טרם ממומש)
 
 | טבלה | תפקיד |
@@ -375,15 +401,15 @@
 ## Roadmap / סדר בנייה (decision #18)
 
 **כבר קיים:** Compose (Postgres + Mosquitto), Prisma + migrations, Nest,
-ingestion + MQTT subscribe, Decision (hysteresis), CI, שלד Terraform.
+ingestion + MQTT subscribe, Decision (hysteresis), Operation + MQTT publish,
+CI, שלד Terraform.
 
 **נותר — בסדר הזה:**
-1. Operation דק + לקוח MQTT משותף (decision #19) — הבראנץ' הנוכחי
-2. ML batch — מעדכן thresholds ב-`automation_rules` (`updatedBy: ml`)
-3. LLM module + טבלת `suggestions` (pending בלבד)
-4. API דק — אישור אדם ל-suggestion (לא דשבורד)
-5. Infra GCP אמיתי — משאב ראשון, אחר כך WIF / plan ב-CI / deploy
-6. Frontend — אופציונלי
+1. ML batch — כיול אחוזונים על `automation_rules` (decision #20) — הבראנץ' הנוכחי
+2. LLM module + טבלת `suggestions` (pending בלבד)
+3. API דק — אישור אדם ל-suggestion (לא דשבורד)
+4. Infra GCP אמיתי — משאב ראשון, אחר כך WIF / plan ב-CI / deploy
+5. Frontend — אופציונלי
 
 **מחוץ לסcope אלא אם יוחלט אחרת:** firmware, ack/`reportedState`, watchdog, RAG.
 
