@@ -379,8 +379,11 @@
   אחוזונים שקופים ועמידים לחריגות; אין תוויות ל-supervised. Closed-loop
   מודע — לומדים את העולם תחת המדיניות הנוכחית, לא "אמת בוטנית".
 - **ברירות מומלצות למימוש** (ניתן לכוון, לא סכימה): `WINDOW_DAYS=7`,
-  `MIN_SAMPLES=50`, `MIN_GAP=5`, max step ~10 ליחידות החיישן, cron לילי.
-  ל-`less_than`: on ≈ אחוזון נמוך, off ≈ גבוה יותר. ל-`greater_than`: הפוך.
+  `MIN_SAMPLES=50`, `MIN_GAP=5`, max step ~10 ליחידות החיישן, cron לילי
+  (03:00). חתכים: אחוזון 0.2 ו-0.8, אינטרפולציה Hyndman–Fan type 7.
+  תחום: `moisture` 0–100, `temperature` 0–50, `light` 0–100000. סוג לא
+  מוכר — בלי clamp של תחום. ל-`less_than`: on ≈ אחוזון נמוך, off ≈ גבוה
+  יותר. ל-`greater_than`: הפוך.
 
 ## סכימת DB — קונספט (טרם ממומש)
 
@@ -402,14 +405,13 @@
 
 **כבר קיים:** Compose (Postgres + Mosquitto), Prisma + migrations, Nest,
 ingestion + MQTT subscribe, Decision (hysteresis), Operation + MQTT publish,
-CI, שלד Terraform.
+ML batch (כיול אחוזונים, decision #20), CI, שלד Terraform.
 
 **נותר — בסדר הזה:**
-1. ML batch — כיול אחוזונים על `automation_rules` (decision #20) — הבראנץ' הנוכחי
-2. LLM module + טבלת `suggestions` (pending בלבד)
-3. API דק — אישור אדם ל-suggestion (לא דשבורד)
-4. Infra GCP אמיתי — משאב ראשון, אחר כך WIF / plan ב-CI / deploy
-5. Frontend — אופציונלי
+1. LLM module + טבלת `suggestions` (pending בלבד)
+2. API דק — אישור אדם ל-suggestion (לא דשבורד)
+3. Infra GCP אמיתי — משאב ראשון, אחר כך WIF / plan ב-CI / deploy
+4. Frontend — אופציונלי
 
 **מחוץ לסcope אלא אם יוחלט אחרת:** firmware, ack/`reportedState`, watchdog, RAG.
 

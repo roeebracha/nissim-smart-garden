@@ -4,7 +4,8 @@
 // The three class methods below touch Prisma. The three standalone
 // functions at the bottom are pure (no DB) so each can be unit-tested with
 // a plain array of numbers, no Postgres required.
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   AutomationRule,
   ThresholdOperator,
@@ -15,86 +16,181 @@ const WINDOW_DAYS = 7;
 const MIN_SAMPLES = 50;
 const MIN_GAP = 5;
 const MAX_STEP = 10;
+// Low/high cuts for v1. Decision #20 says "a low percentile" and "a higher
+// one" and leaves the exact cuts tunable.
+const LOW_PERCENTILE = 0.2;
+const HIGH_PERCENTILE = 0.8;
+
+// Domain clamp by sensor type (decision #20). Unknown types get hysteresis
+// order, gap, and step limit only — no invented numeric range.
+const SENSOR_RANGE: Record<string, { min: number; max: number }> = {
+  moisture: { min: 0, max: 100 },
+  temperature: { min: 0, max: 50 },
+  light: { min: 0, max: 100_000 },
+};
 
 type ThresholdPair = { onThreshold: number; offThreshold: number };
 
 @Injectable()
 export class MlService {
+  private readonly logger = new Logger(MlService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
-  // Entry point for the nightly cron (wire with @Cron once
-  // @nestjs/schedule is installed, decision #20). Loads active rules and
-  // recalibrates each one in turn (for...of + await) — not in parallel,
-  // so DB load stays predictable and one bad rule can't race another.
-  //
-  // Not marked `async` yet since the body has no `await` — add it back
-  // once you call `await this.findActiveRules()` /
-  // `await this.recalibrateRule(...)` inside.
-  recalibrateRules(): Promise<void> {
-    throw new Error('TODO: implement recalibrateRules');
+  // Nightly, sequential (decision #20). One rule's failure is logged and
+  // skipped so the rest of the batch still runs. A failed job leaves the
+  // previous thresholds in place; Decision keeps using them.
+  @Cron(CronExpression.EVERY_DAY_AT_3AM, { name: 'ml-recalibrate' })
+  async recalibrateRules(): Promise<void> {
+    const rules = await this.findActiveRules();
+    for (const rule of rules) {
+      try {
+        await this.recalibrateRule(rule);
+      } catch (err: unknown) {
+        const stack = err instanceof Error ? err.stack : undefined;
+        this.logger.error(`recalibrate failed for rule ${rule.id}`, stack);
+      }
+    }
   }
 
   // Enabled automation_rules only — mirrors
   // DecisionService.findMatchingRules (decision.service.ts).
   findActiveRules(): Promise<AutomationRule[]> {
-    throw new Error('TODO: implement findActiveRules');
+    return this.prisma.automationRule.findMany({
+      where: { enabled: true },
+    });
   }
 
-  // One rule, end to end:
-  // - load sensor_readings for rule.planterId + rule.sensorType, limited
-  //   to the last WINDOW_DAYS
-  // - if fewer than MIN_SAMPLES readings, return without writing anything
-  //   (cold start — leave existing seed/ml thresholds as they are)
-  // - sort the values, call percentile() twice for a low and high cut
-  // - call deriveThresholds() to map those two numbers to on/off by
-  //   rule.operator
-  // - call enforceSafetyLimits() against the rule's current thresholds
-  // - prisma.automationRule.update(...) with the result + updatedBy: 'ml'
-  recalibrateRule(rule: AutomationRule): Promise<void> {
-    void rule;
-    void WINDOW_DAYS;
-    void MIN_SAMPLES;
-    void percentile;
-    void deriveThresholds;
-    void enforceSafetyLimits;
-    throw new Error('TODO: implement recalibrateRule');
+  // One rule, end to end. Window is server time (`receivedAt`): the device
+  // clock on `recordedAt` can be wrong, and this job is about "the last
+  // 7 days we actually stored".
+  async recalibrateRule(rule: AutomationRule): Promise<void> {
+    const since = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const readings = await this.prisma.sensorReading.findMany({
+      where: {
+        receivedAt: { gte: since },
+        sensor: { planterId: rule.planterId, type: rule.sensorType },
+      },
+      select: { value: true },
+    });
+
+    if (readings.length < MIN_SAMPLES) {
+      this.logger.log(
+        `skip rule ${rule.id}: ${readings.length} samples < ${MIN_SAMPLES}`,
+      );
+      return;
+    }
+
+    const values = readings
+      .map((reading) => reading.value)
+      .sort((a, b) => a - b);
+    const proposed = deriveThresholds(
+      percentile(values, LOW_PERCENTILE),
+      percentile(values, HIGH_PERCENTILE),
+      rule.operator,
+    );
+    const next = enforceSafetyLimits(
+      proposed,
+      { onThreshold: rule.onThreshold, offThreshold: rule.offThreshold },
+      rule.operator,
+      rule.sensorType,
+    );
+
+    await this.prisma.automationRule.update({
+      where: { id: rule.id },
+      data: {
+        onThreshold: next.onThreshold,
+        offThreshold: next.offThreshold,
+        updatedBy: 'ml',
+      },
+    });
   }
 }
 
-// `values` must already be sorted ascending. `p` is 0–1 (e.g. 0.2 for the
-// 20th percentile). Pick one interpolation method and say which one in a
-// comment here — there is more than one valid definition of "percentile".
-function percentile(values: number[], p: number): number {
-  void values;
-  void p;
-  throw new Error('TODO: implement percentile');
+// Hyndman–Fan type 7 (numpy's default, Excel PERCENTILE.INC):
+// h = p * (n - 1), then linear interpolation between floor(h) and ceil(h).
+// `values` must already be sorted ascending. `p` is 0–1.
+export function percentile(values: number[], p: number): number {
+  if (values.length === 0) {
+    throw new Error('percentile requires at least one value');
+  }
+  if (p < 0 || p > 1) {
+    throw new Error('percentile p must be between 0 and 1');
+  }
+  const h = p * (values.length - 1);
+  const lo = Math.floor(h);
+  const hi = Math.ceil(h);
+  if (lo === hi) {
+    return values[lo];
+  }
+  return values[lo] + (h - lo) * (values[hi] - values[lo]);
 }
 
 // Maps a low/high percentile pair to { onThreshold, offThreshold }
 // according to operator direction (decision #20):
 //   less_than:    onThreshold = lowPercentile,  offThreshold = highPercentile
 //   greater_than: reversed
-function deriveThresholds(
+export function deriveThresholds(
   lowPercentile: number,
   highPercentile: number,
   operator: ThresholdOperator,
 ): ThresholdPair {
-  void lowPercentile;
-  void highPercentile;
-  void operator;
-  throw new Error('TODO: implement deriveThresholds');
+  if (operator === 'less_than') {
+    return { onThreshold: lowPercentile, offThreshold: highPercentile };
+  }
+  return { onThreshold: highPercentile, offThreshold: lowPercentile };
 }
 
-// Enforces hysteresis order + MIN_GAP, clamps to a safe range for the
-// sensor type, and caps how far `proposed` may move from `previous` in a
-// single run (MAX_STEP) so one noisy week can't swing a rule all at once.
-function enforceSafetyLimits(
+// 1. Move each threshold at most MAX_STEP from `previous`.
+// 2. Clamp into the sensor domain (may exceed the step — an illegal seed
+//    should not stay out of range for weeks).
+// 3. Restore hysteresis order and MIN_GAP inside that domain. Gap and
+//    domain outrank MAX_STEP when one step cannot satisfy both.
+export function enforceSafetyLimits(
   proposed: ThresholdPair,
   previous: ThresholdPair,
+  operator: ThresholdOperator,
+  sensorType: string,
 ): ThresholdPair {
-  void proposed;
-  void previous;
-  void MIN_GAP;
-  void MAX_STEP;
-  throw new Error('TODO: implement enforceSafetyLimits');
+  const range = SENSOR_RANGE[sensorType];
+  let on = stepToward(previous.onThreshold, proposed.onThreshold);
+  let off = stepToward(previous.offThreshold, proposed.offThreshold);
+  if (range) {
+    on = clamp(on, range.min, range.max);
+    off = clamp(off, range.min, range.max);
+  }
+
+  if (operator === 'less_than') {
+    if (off < on + MIN_GAP) {
+      const liftedOff = on + MIN_GAP;
+      if (!range || liftedOff <= range.max) {
+        off = liftedOff;
+      } else {
+        off = range.max;
+        on = Math.max(range.min, off - MIN_GAP);
+      }
+    }
+  } else if (on < off + MIN_GAP) {
+    const liftedOn = off + MIN_GAP;
+    if (!range || liftedOn <= range.max) {
+      on = liftedOn;
+    } else {
+      on = range.max;
+      off = Math.max(range.min, on - MIN_GAP);
+    }
+  }
+
+  return { onThreshold: on, offThreshold: off };
+}
+
+function stepToward(previous: number, target: number): number {
+  const delta = target - previous;
+  if (Math.abs(delta) <= MAX_STEP) {
+    return target;
+  }
+  return previous + Math.sign(delta) * MAX_STEP;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
