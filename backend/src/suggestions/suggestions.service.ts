@@ -1,9 +1,14 @@
 // Copies one pending suggestion onto automation_rules.
 //
-// Only a pending row can be approved. The conditional update is the claim:
-// a second approve matches zero rows and does not write the rule again.
-// Postgres holds the row lock until the transaction commits, so two
-// concurrent approves of the same id cannot both pass the WHERE.
+// Only a pending row can be approved. updateManyAndReturn claims the row
+// (WHERE id AND status = pending) and returns it. A second approve matches
+// nothing and does not write the rule again. Postgres holds the row lock
+// until the transaction commits, so two concurrent approves of the same id
+// cannot both pass the WHERE.
+//
+// A legal hysteresis band is checked after the claim and before the upsert.
+// A bad band throws inside the transaction, so the claim rolls back and the
+// suggestion stays pending.
 //
 // updatedBy is `seed`. ThresholdSource is only `seed | ml`. An approved
 // suggestion is a hand-set rule, not the nightly calibration job. This PR
@@ -16,9 +21,11 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Suggestion } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { hysteresisError } from '../rules/threshold-band';
 
 @Injectable()
 export class SuggestionsService {
@@ -34,14 +41,17 @@ export class SuggestionsService {
 
   async approve(id: number): Promise<Suggestion> {
     return this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.suggestion.updateMany({
+      const [suggestion] = await tx.suggestion.updateManyAndReturn({
         where: { id, status: 'pending' },
         data: { status: 'approved' },
       });
 
-      if (claimed.count !== 1) {
-        const existing = await tx.suggestion.findUnique({ where: { id } });
-        if (!existing) {
+      if (!suggestion) {
+        const exists = await tx.suggestion.findUnique({
+          where: { id },
+          select: { id: true },
+        });
+        if (!exists) {
           throw new NotFoundException(`Suggestion ${id} not found`);
         }
         throw new ConflictException(
@@ -49,9 +59,15 @@ export class SuggestionsService {
         );
       }
 
-      const suggestion = await tx.suggestion.findUnique({ where: { id } });
-      if (!suggestion) {
-        throw new NotFoundException(`Suggestion ${id} not found`);
+      // Same invariant the suggest tool uses. Throw before the upsert so
+      // the transaction rolls the claim back.
+      const bandError = hysteresisError(
+        suggestion.operator,
+        suggestion.onThreshold,
+        suggestion.offThreshold,
+      );
+      if (bandError !== null) {
+        throw new UnprocessableEntityException(bandError);
       }
 
       // One rule per (planterId, sensorType, actuatorType) — decision #13.

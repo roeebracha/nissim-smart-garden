@@ -2,6 +2,7 @@ import {
   ConflictException,
   INestApplication,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -104,7 +105,7 @@ describe('SuggestionsController', () => {
     expect(suggestions.approve).not.toHaveBeenCalled();
   });
 
-  it('maps a missing id to 404 and a second approve to 409', async () => {
+  it('maps a missing id to 404, a second approve to 409, and a bad band to 422', async () => {
     suggestions.approve.mockRejectedValueOnce(
       new NotFoundException('Suggestion 9 not found'),
     );
@@ -114,5 +115,12 @@ describe('SuggestionsController', () => {
       new ConflictException('Only a pending suggestion can be approved'),
     );
     await request(server()).post('/suggestions/12/approve').expect(409);
+
+    suggestions.approve.mockRejectedValueOnce(
+      new UnprocessableEntityException(
+        'for less_than, on_threshold must be below off_threshold',
+      ),
+    );
+    await request(server()).post('/suggestions/12/approve').expect(422);
   });
 });
