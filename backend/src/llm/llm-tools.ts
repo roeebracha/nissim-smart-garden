@@ -4,10 +4,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  ACTUATOR_TYPES,
   GET_RECENT_READINGS,
   MAX_READING_DAYS,
   MAX_READING_ROWS,
   MAX_SUMMARY_CHARS,
+  SENSOR_TYPES,
   SUGGEST_RULE_CHANGE,
 } from './constants';
 
@@ -51,17 +53,21 @@ export class LlmTools {
       return { error: 'planter_id is outside this question' };
     }
 
+    // One clock for the cut, the sort, and covers_from: the device
+    // timestamp the model reads. received_at is still returned so a
+    // skewed device clock is visible next to server time.
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const rows = await this.prisma.sensorReading.findMany({
       where: {
         sensor: { planterId },
-        receivedAt: { gte: since },
+        recordedAt: { gte: since },
       },
-      orderBy: { receivedAt: 'desc' },
+      orderBy: { recordedAt: 'desc' },
       take: MAX_READING_ROWS,
       select: {
         value: true,
         recordedAt: true,
+        receivedAt: true,
         sensor: { select: { name: true, type: true } },
       },
     });
@@ -69,12 +75,14 @@ export class LlmTools {
     return {
       planter_id: planterId,
       days,
-      capped_at: MAX_READING_ROWS,
+      truncated: rows.length === MAX_READING_ROWS,
+      covers_from: oldestRecordedAt(rows),
       readings: rows.map((row) => ({
         sensor: row.sensor.name,
         type: row.sensor.type,
         value: row.value,
         recorded_at: row.recordedAt.toISOString(),
+        received_at: row.receivedAt.toISOString(),
       })),
     };
   }
@@ -84,26 +92,40 @@ export class LlmTools {
     scope: ToolScope,
   ): Promise<Record<string, unknown>> {
     const planterId = parsePlanterId(input.planter_id);
-    const sensorType = parseLabel(input.sensor_type);
-    const actuatorType = parseLabel(input.actuator_type);
+    const sensorType = parseOneOf(input.sensor_type, SENSOR_TYPES);
+    const actuatorType = parseOneOf(input.actuator_type, ACTUATOR_TYPES);
     const onThreshold = parseFinite(input.on_threshold);
     const offThreshold = parseFinite(input.off_threshold);
     const operator = parseOperator(input.operator);
     const summary = parseSummary(input.summary);
 
-    if (
-      planterId === null ||
-      sensorType === null ||
-      actuatorType === null ||
-      onThreshold === null ||
-      offThreshold === null ||
-      operator === null ||
-      summary === null
-    ) {
+    if (planterId === null) {
+      return { error: 'planter_id must be a positive integer' };
+    }
+    if (sensorType === null) {
       return {
-        error:
-          'suggest_rule_change needs planter_id, sensor_type, actuator_type, on_threshold, off_threshold, operator, and summary',
+        error: `sensor_type must be one of: ${SENSOR_TYPES.join(', ')}`,
       };
+    }
+    if (actuatorType === null) {
+      return {
+        error: `actuator_type must be one of: ${ACTUATOR_TYPES.join(', ')}`,
+      };
+    }
+    if (onThreshold === null || offThreshold === null) {
+      return { error: 'on_threshold and off_threshold must be finite numbers' };
+    }
+    if (operator === null) {
+      return { error: 'operator must be less_than or greater_than' };
+    }
+    if (summary === null) {
+      return {
+        error: `summary must be a non-empty string up to ${MAX_SUMMARY_CHARS} characters`,
+      };
+    }
+    const bandError = hysteresisError(operator, onThreshold, offThreshold);
+    if (bandError !== null) {
+      return { error: bandError };
     }
     if (!planterAllowed(planterId, scope)) {
       return { error: 'planter_id is outside this question' };
@@ -144,6 +166,43 @@ function parseDays(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isInteger(value)) return null;
   if (value < 1 || value > MAX_READING_DAYS) return null;
   return value;
+}
+
+function oldestRecordedAt(rows: { recordedAt: Date }[]): string | null {
+  let oldest: Date | null = null;
+  for (const row of rows) {
+    if (oldest === null || row.recordedAt < oldest) oldest = row.recordedAt;
+  }
+  return oldest === null ? null : oldest.toISOString();
+}
+
+// less_than turns on below on_threshold and off above off_threshold, so
+// on must sit below off. greater_than is the mirror. An inverted band
+// chatters: the same reading turns the actuator on and then off.
+function hysteresisError(
+  operator: ThresholdOperatorName,
+  onThreshold: number,
+  offThreshold: number,
+): string | null {
+  if (operator === 'less_than' && !(onThreshold < offThreshold)) {
+    return 'for less_than, on_threshold must be below off_threshold';
+  }
+  if (operator === 'greater_than' && !(onThreshold > offThreshold)) {
+    return 'for greater_than, on_threshold must be above off_threshold';
+  }
+  return null;
+}
+
+function parseOneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): T | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  for (const candidate of allowed) {
+    if (candidate === trimmed) return candidate;
+  }
+  return null;
 }
 
 function parseLabel(value: unknown): string | null {

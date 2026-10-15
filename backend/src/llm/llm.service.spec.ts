@@ -1,9 +1,8 @@
 import { LlmInsight, Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { AnthropicMessagesClient } from './anthropic-messages.client';
 import { LlmService } from './llm.service';
 import { LlmTools } from './llm-tools';
-import { MessagesRequest, MessagesResponse } from './messages';
+import { MessagesClient, MessagesRequest, MessagesResponse } from './messages';
 
 function endTurn(text: string): MessagesResponse {
   return {
@@ -66,7 +65,7 @@ describe('LlmService', () => {
     };
     const service = new LlmService(
       prisma as unknown as PrismaService,
-      claude as unknown as AnthropicMessagesClient,
+      claude satisfies MessagesClient,
       tools as unknown as LlmTools,
     );
     return { prisma, create, claude, tools, service };
@@ -114,5 +113,15 @@ describe('LlmService', () => {
       },
     ]);
     expect(data.data.planterId).toBe(1);
+  });
+
+  it('does not store an empty answer', async () => {
+    const { create, claude, service } = setup();
+    claude.create.mockResolvedValue(endTurn('   '));
+
+    await expect(service.ask({ question: 'Anything?' })).rejects.toThrow(
+      'agent loop ended without a final answer',
+    );
+    expect(create).not.toHaveBeenCalled();
   });
 });

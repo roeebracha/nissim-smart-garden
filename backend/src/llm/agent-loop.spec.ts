@@ -87,7 +87,13 @@ describe('runAgentLoop', () => {
     const executeTool = jest.fn().mockResolvedValue({ ok: true });
     let n = 0;
     const client = {
-      create: jest.fn(() => {
+      create: jest.fn((request: MessagesRequest) => {
+        if (request.tools.length === 0) {
+          return Promise.resolve({
+            stop_reason: 'end_turn',
+            content: [{ type: 'text' as const, text: 'Stopped.' }],
+          });
+        }
         n += 1;
         return Promise.resolve(toolUse(`toolu_${n}`));
       }),
@@ -102,11 +108,31 @@ describe('runAgentLoop', () => {
     });
 
     expect(executeTool).toHaveBeenCalledTimes(MAX_TOOL_CALLS);
+    expect(result.content).toBe('Stopped.');
     expect(result.trace).toHaveLength(MAX_TOOL_CALLS);
     const calls = client.create.mock.calls;
     expect(calls.length).toBe(MAX_TOOL_CALLS + 1);
-    const last = calls[calls.length - 1]?.[0] as MessagesRequest;
-    expect(last.tools).toEqual([]);
+    const last = calls[calls.length - 1]?.[0];
+    expect(last?.tools).toEqual([]);
+  });
+
+  it('throws when the loop ends without a final answer', async () => {
+    const client = {
+      create: jest.fn().mockResolvedValue({
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: '   ' }],
+      }),
+    };
+
+    await expect(
+      runAgentLoop({
+        client,
+        system: 'system',
+        tools,
+        question: 'Silence',
+        executeTool: jest.fn(),
+      }),
+    ).rejects.toThrow('agent loop ended without a final answer');
   });
 
   it('does not execute tools past the cap inside one response', async () => {

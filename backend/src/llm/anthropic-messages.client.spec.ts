@@ -3,7 +3,11 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { AnthropicMessagesClient } from './anthropic-messages.client';
-import { ANTHROPIC_MESSAGES_URL, ANTHROPIC_VERSION } from './constants';
+import {
+  ANTHROPIC_MESSAGES_URL,
+  ANTHROPIC_VERSION,
+  LLM_REQUEST_TIMEOUT_MS,
+} from './constants';
 import { MessagesRequest } from './messages';
 
 const request: MessagesRequest = {
@@ -33,9 +37,8 @@ describe('AnthropicMessagesClient', () => {
   it('does not call fetch when the key or model is missing', async () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_MODEL;
-    const client = new AnthropicMessagesClient();
     const fetchImpl = jest.fn();
-    client.fetchImpl = fetchImpl;
+    const client = new AnthropicMessagesClient(fetchImpl);
 
     await expect(client.create(request)).rejects.toBeInstanceOf(
       ServiceUnavailableException,
@@ -46,7 +49,6 @@ describe('AnthropicMessagesClient', () => {
   it('posts the model from the environment and does not use a live host', async () => {
     process.env.ANTHROPIC_API_KEY = 'test-key';
     process.env.ANTHROPIC_MODEL = 'claude-test';
-    const client = new AnthropicMessagesClient();
     const fetchImpl = jest.fn<Promise<Response>, [string, RequestInit]>();
     fetchImpl.mockResolvedValue(
       new Response(
@@ -57,7 +59,8 @@ describe('AnthropicMessagesClient', () => {
         { status: 200 },
       ),
     );
-    client.fetchImpl = fetchImpl;
+    const timeout = jest.spyOn(AbortSignal, 'timeout');
+    const client = new AnthropicMessagesClient(fetchImpl);
 
     const result = await client.create(request);
 
@@ -83,15 +86,32 @@ describe('AnthropicMessagesClient', () => {
       system: 'system',
       messages: [{ role: 'user', content: 'Hello' }],
     });
+    expect(timeout).toHaveBeenCalledWith(LLM_REQUEST_TIMEOUT_MS);
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    timeout.mockRestore();
+  });
+
+  it('turns a timeout into a gateway error and does not call a live host', async () => {
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    process.env.ANTHROPIC_MODEL = 'claude-test';
+    const fetchImpl = jest.fn<Promise<Response>, [string, RequestInit]>();
+    fetchImpl.mockRejectedValue(
+      Object.assign(new Error('timed out'), { name: 'TimeoutError' }),
+    );
+    const client = new AnthropicMessagesClient(fetchImpl);
+
+    await expect(client.create(request)).rejects.toBeInstanceOf(
+      BadGatewayException,
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('does not parse a failed response as a successful turn', async () => {
     process.env.ANTHROPIC_API_KEY = 'test-key';
     process.env.ANTHROPIC_MODEL = 'claude-test';
-    const client = new AnthropicMessagesClient();
-    client.fetchImpl = jest
-      .fn()
-      .mockResolvedValue(new Response('no', { status: 500 }));
+    const fetchImpl = jest.fn<Promise<Response>, [string, RequestInit]>();
+    fetchImpl.mockResolvedValue(new Response('no', { status: 500 }));
+    const client = new AnthropicMessagesClient(fetchImpl);
 
     await expect(client.create(request)).rejects.toBeInstanceOf(
       BadGatewayException,

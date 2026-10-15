@@ -6,9 +6,14 @@ import { AnthropicMessagesClient } from './anthropic-messages.client';
 import { LlmController } from './llm.controller';
 import { LlmService } from './llm.service';
 import { LlmTools } from './llm-tools';
+import { MESSAGES_CLIENT } from './messages';
 
 @Module({
   controllers: [LlmController],
-  providers: [LlmService, LlmTools, AnthropicMessagesClient],
+  providers: [
+    LlmService,
+    LlmTools,
+    { provide: MESSAGES_CLIENT, useClass: AnthropicMessagesClient },
+  ],
 })
 export class LlmModule {}

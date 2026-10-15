@@ -10,6 +10,7 @@ import { LlmController } from './llm.controller';
 import { LlmModule } from './llm.module';
 import { LlmService } from './llm.service';
 import { LlmTools } from './llm-tools';
+import { MESSAGES_CLIENT } from './messages';
 
 @Global()
 @Module({
@@ -37,18 +38,17 @@ describe('LlmModule', () => {
     expect(meta(MODULE_METADATA.PROVIDERS, LlmModule)).toEqual([
       LlmService,
       LlmTools,
-      AnthropicMessagesClient,
+      { provide: MESSAGES_CLIENT, useClass: AnthropicMessagesClient },
     ]);
     expect(meta(MODULE_METADATA.IMPORTS, LlmModule) ?? []).toEqual([]);
-    expect(meta('design:paramtypes', LlmService)).toEqual([
-      PrismaService,
-      AnthropicMessagesClient,
-      LlmTools,
+    expect(meta('self:paramtypes', LlmService)).toEqual([
+      { index: 1, param: MESSAGES_CLIENT },
     ]);
-    expect(meta('design:paramtypes', LlmTools)).toEqual([PrismaService]);
-    expect(meta('design:paramtypes', AnthropicMessagesClient) ?? []).toEqual(
-      [],
+    const serviceParams = meta('design:paramtypes', LlmService);
+    expect(Array.isArray(serviceParams) ? serviceParams : []).not.toContain(
+      AnthropicMessagesClient,
     );
+    expect(meta('design:paramtypes', LlmTools)).toEqual([PrismaService]);
     expect(meta('design:paramtypes', LlmController)).toEqual([LlmService]);
 
     for (const type of [
@@ -62,10 +62,24 @@ describe('LlmModule', () => {
       expect(list).not.toContain(OperationService);
     }
 
+    const fake = {
+      create: jest.fn().mockResolvedValue({
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'from the fake' }],
+      }),
+    };
     const moduleRef = await Test.createTestingModule({
       imports: [FakePrismaModule, LlmModule],
-    }).compile();
-    expect(moduleRef.get(LlmService)).toBeInstanceOf(LlmService);
+    })
+      .overrideProvider(MESSAGES_CLIENT)
+      .useValue(fake)
+      .compile();
+    const service = moduleRef.get(LlmService);
+    expect(service).toBeInstanceOf(LlmService);
+    await expect(service.explain({ question: 'Hi' })).resolves.toMatchObject({
+      content: 'from the fake',
+    });
+    expect(fake.create).toHaveBeenCalled();
     expect(() => moduleRef.get(OperationService)).toThrow();
   });
 

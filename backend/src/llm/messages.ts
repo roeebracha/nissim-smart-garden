@@ -1,15 +1,29 @@
-import { GET_RECENT_READINGS, SUGGEST_RULE_CHANGE } from './constants';
+import {
+  ACTUATOR_TYPES,
+  GET_RECENT_READINGS,
+  SENSOR_TYPES,
+  SUGGEST_RULE_CHANGE,
+} from './constants';
 import { isRecord } from './guards';
+
+// Nest token for the Messages API. The service depends on this contract,
+// not on the Anthropic class (decision #5 stays behind the token).
+export const MESSAGES_CLIENT = Symbol('MESSAGES_CLIENT');
 
 export const SYSTEM_PROMPT = [
   'You explain a two-planter balcony garden (tea and peppers).',
   'You may read recent sensor values and you may store a pending suggestion to change an automation rule.',
-  'get_recent_readings takes planter_id and days. days must be an integer from 1 to 7. Results are capped.',
+  'get_recent_readings takes planter_id and days. days must be an integer from 1 to 7.',
+  'The result is the newest rows by device time (recorded_at), capped.',
+  'truncated is true when that cap is hit. covers_from is the oldest recorded_at returned, or null.',
+  'Each row has recorded_at (device clock) and received_at (server clock).',
   'suggest_rule_change only stores a pending suggestion. It does not change automation rules and it does not turn a pump or a lamp on or off.',
   'There is no tool that actuates. If the tools are not enough, say so.',
-  'Sensor types are free strings such as moisture, light, and temperature.',
-  'Actuator types are free strings such as pump and light (the lamp).',
-  'Operators are less_than and greater_than.',
+  `A suggestion sensor_type must be one of: ${SENSOR_TYPES.join(', ')}.`,
+  `A suggestion actuator_type must be one of: ${ACTUATOR_TYPES.join(', ')}. light is the lamp.`,
+  'less_than requires on_threshold below off_threshold.',
+  'greater_than requires on_threshold above off_threshold.',
+  'If a tool returns an error, correct the arguments and try again.',
 ].join('\n');
 
 type JsonSchemaProperty = {
@@ -34,7 +48,7 @@ export const LLM_TOOLS: ClaudeTool[] = [
   {
     name: GET_RECENT_READINGS,
     description:
-      'Read recent sensor readings for one planter. days is an integer from 1 to 7. The result is capped at the newest rows.',
+      'Read recent sensor readings for one planter. days is an integer from 1 to 7. Rows are newest by recorded_at and capped. truncated is true when the cap is hit. covers_from is the oldest recorded_at returned, or null. Each row includes recorded_at and received_at.',
     input_schema: {
       type: 'object',
       properties: {
@@ -63,13 +77,19 @@ export const LLM_TOOLS: ClaudeTool[] = [
         planter_id: { type: 'integer', minimum: 1 },
         sensor_type: {
           type: 'string',
-          description: 'Matches Sensor.type, for example moisture',
+          enum: [...SENSOR_TYPES],
+          description: 'moisture, light, or temperature',
         },
         actuator_type: {
           type: 'string',
-          description: 'Matches Actuator.type: pump or light',
+          enum: [...ACTUATOR_TYPES],
+          description: 'pump, or light for the lamp',
         },
-        on_threshold: { type: 'number' },
+        on_threshold: {
+          type: 'number',
+          description:
+            'For less_than, below off_threshold. For greater_than, above it.',
+        },
         off_threshold: { type: 'number' },
         operator: { type: 'string', enum: ['less_than', 'greater_than'] },
         summary: {

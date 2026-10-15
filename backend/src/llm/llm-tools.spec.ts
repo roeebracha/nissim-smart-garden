@@ -7,14 +7,15 @@ import {
 import { LlmTools } from './llm-tools';
 
 type ReadingQuery = {
-  where: { receivedAt: { gte: Date }; sensor: { planterId: number } };
+  where: { recordedAt: { gte: Date }; sensor: { planterId: number } };
   take: number;
-  orderBy: { receivedAt: 'desc' };
+  orderBy: { recordedAt: 'desc' };
 };
 
 type StoredReading = {
   value: number;
   recordedAt: Date;
+  receivedAt: Date;
   sensor: { name: string; type: string };
 };
 
@@ -73,11 +74,13 @@ describe('LlmTools.get_recent_readings', () => {
 
   it('caps a 7-day window at the newest rows', async () => {
     const recordedAt = new Date('2026-10-01T00:00:00.000Z');
+    const receivedAt = new Date('2026-10-01T00:00:05.000Z');
     const { findMany, tools } = toolsWith({
       readings: [
         {
           value: 33,
           recordedAt,
+          receivedAt,
           sensor: { name: 'soil', type: 'moisture' },
         },
       ],
@@ -93,24 +96,59 @@ describe('LlmTools.get_recent_readings', () => {
     expect(query).toBeDefined();
     if (!query) return;
     expect(query.take).toBe(MAX_READING_ROWS);
-    expect(query.orderBy).toEqual({ receivedAt: 'desc' });
+    expect(query.orderBy).toEqual({ recordedAt: 'desc' });
     expect(query.where.sensor).toEqual({ planterId: 1 });
-    const ageMs = Date.now() - query.where.receivedAt.gte.getTime();
+    const ageMs = Date.now() - query.where.recordedAt.gte.getTime();
     expect(ageMs).toBeGreaterThan(6.9 * 24 * 60 * 60 * 1000);
     expect(ageMs).toBeLessThan(7.1 * 24 * 60 * 60 * 1000);
     expect(result).toEqual({
       planter_id: 1,
       days: 7,
-      capped_at: MAX_READING_ROWS,
+      truncated: false,
+      covers_from: '2026-10-01T00:00:00.000Z',
       readings: [
         {
           sensor: 'soil',
           type: 'moisture',
           value: 33,
           recorded_at: '2026-10-01T00:00:00.000Z',
+          received_at: '2026-10-01T00:00:05.000Z',
         },
       ],
     });
+  });
+
+  it('says when the cap is hit and reports the oldest device time', async () => {
+    const readings = Array.from({ length: MAX_READING_ROWS }, (_, i) => ({
+      value: i,
+      recordedAt: new Date(Date.UTC(2026, 9, 1, 0, 0, MAX_READING_ROWS - i)),
+      receivedAt: new Date(Date.UTC(2026, 9, 1, 1, 0, i)),
+      sensor: { name: 'soil', type: 'moisture' },
+    }));
+    const { tools } = toolsWith({ readings });
+
+    const result = await tools.execute(
+      'get_recent_readings',
+      { planter_id: 1, days: 1 },
+      {},
+    );
+
+    expect(result).toMatchObject({
+      truncated: true,
+      covers_from: readings[readings.length - 1]?.recordedAt.toISOString(),
+    });
+  });
+
+  it('reports a null window when nothing was returned', async () => {
+    const { tools } = toolsWith();
+
+    const result = await tools.execute(
+      'get_recent_readings',
+      { planter_id: 1, days: 1 },
+      {},
+    );
+
+    expect(result).toMatchObject({ truncated: false, covers_from: null });
   });
 
   it('does not query another planter when the question is scoped', async () => {
@@ -155,6 +193,86 @@ describe('LlmTools.suggest_rule_change', () => {
     expect(prisma.automationRule.update).not.toHaveBeenCalled();
     expect(prisma.automationRule.upsert).not.toHaveBeenCalled();
     expect(prisma.automationRule.delete).not.toHaveBeenCalled();
+  });
+
+  it.each(['soil_moisture', 'humidity', 'lamp', 'float'])(
+    'rejects sensor_type %s before insert',
+    async (sensorType) => {
+      const { prisma, tools } = toolsWith();
+
+      const result = await tools.execute(
+        SUGGEST_RULE_CHANGE,
+        { ...suggestionInput, sensor_type: sensorType },
+        {},
+      );
+
+      expect(prisma.suggestion.create).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        error: 'sensor_type must be one of: moisture, light, temperature',
+      });
+    },
+  );
+
+  it('rejects actuator_type lamp before insert', async () => {
+    const { prisma, tools } = toolsWith();
+
+    const result = await tools.execute(
+      SUGGEST_RULE_CHANGE,
+      { ...suggestionInput, actuator_type: 'lamp' },
+      {},
+    );
+
+    expect(prisma.suggestion.create).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      error: 'actuator_type must be one of: pump, light',
+    });
+  });
+
+  it('rejects an inverted less_than band before insert', async () => {
+    const { prisma, tools } = toolsWith();
+
+    const result = await tools.execute(
+      SUGGEST_RULE_CHANGE,
+      { ...suggestionInput, on_threshold: 40, off_threshold: 20 },
+      {},
+    );
+
+    expect(prisma.suggestion.create).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      error: 'for less_than, on_threshold must be below off_threshold',
+    });
+  });
+
+  it('rejects an inverted greater_than band and accepts the matching direction', async () => {
+    const { prisma, tools } = toolsWith();
+
+    const inverted = await tools.execute(
+      SUGGEST_RULE_CHANGE,
+      {
+        ...suggestionInput,
+        operator: 'greater_than',
+        on_threshold: 20,
+        off_threshold: 40,
+      },
+      {},
+    );
+    expect(inverted).toEqual({
+      error: 'for greater_than, on_threshold must be above off_threshold',
+    });
+    expect(prisma.suggestion.create).not.toHaveBeenCalled();
+
+    const accepted = await tools.execute(
+      SUGGEST_RULE_CHANGE,
+      {
+        ...suggestionInput,
+        operator: 'greater_than',
+        on_threshold: 40,
+        off_threshold: 20,
+      },
+      {},
+    );
+    expect(accepted).toEqual({ suggestion_id: 9, status: 'pending' });
+    expect(prisma.suggestion.create).toHaveBeenCalledTimes(1);
   });
 
   it('does not write when the summary is missing', async () => {

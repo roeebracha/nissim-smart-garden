@@ -48,7 +48,7 @@ export async function runAgentLoop(args: {
       tools: [],
       maxTokens,
     });
-    return { content: textOf(response.content), trace };
+    return { content: answerOrThrow(response), trace };
   }
 
   for (let round = 0; round < maxToolCalls; round += 1) {
@@ -60,7 +60,7 @@ export async function runAgentLoop(args: {
     });
     const toolUses = toolUseBlocks(response);
     if (response.stop_reason !== 'tool_use' || toolUses.length === 0) {
-      return { content: textOf(response.content), trace };
+      return { content: answerOrThrow(response), trace };
     }
 
     messages.push({ role: 'assistant', content: response.content });
@@ -84,11 +84,21 @@ export async function runAgentLoop(args: {
         tools: [],
         maxTokens,
       });
-      return { content: textOf(finalResponse.content), trace };
+      return { content: answerOrThrow(finalResponse), trace };
     }
   }
 
-  return { content: '', trace };
+  // Every round that continues executes at least one tool, so a finished
+  // cap returns above. Landing here means the loop lost track of that.
+  throw new Error('agent loop ended without a final answer');
+}
+
+function answerOrThrow(response: MessagesResponse): string {
+  const content = textOf(response.content);
+  if (content === '') {
+    throw new Error('agent loop ended without a final answer');
+  }
+  return content;
 }
 
 function toolUseBlocks(response: MessagesResponse): ClaudeToolUseBlock[] {

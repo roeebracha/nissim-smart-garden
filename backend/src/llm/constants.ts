@@ -15,6 +15,16 @@ export const MAX_SUMMARY_CHARS = 2000;
 // Output budget for one Claude turn. Separate from the tool-call cap.
 export const MAX_OUTPUT_TOKENS = 1024;
 
+// One Claude HTTP call. MAX_TOOL_CALLS limits how many rounds we pay
+// for; this limits how long one round can sit on a stuck socket.
+// 30 seconds is enough for a short garden answer.
+export const LLM_REQUEST_TIMEOUT_MS = 30_000;
+
+// Suggestion boundary. Ingestion still accepts any Sensor.type string.
+// These are the strings Decision already matches.
+export const SENSOR_TYPES = ['moisture', 'light', 'temperature'] as const;
+export const ACTUATOR_TYPES = ['pump', 'light'] as const;
+
 export const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
 export const ANTHROPIC_VERSION = '2023-06-01';
 
