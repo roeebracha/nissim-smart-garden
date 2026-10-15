@@ -147,10 +147,13 @@ model LlmInsight {
   @@map("llm_insights")
 }
 
-// This module only inserts `pending`. The approved transition is a later API
-// (decision #2): a suggestion is not an automation rule until a person approves it.
+// The LLM module only inserts `pending`. `approved` is written by
+// POST /suggestions/:id/approve, which copies the thresholds onto
+// automation_rules. A suggestion is not a rule until a person approves it
+// (decision #2). No reject value in this enum — that route is not built.
 enum SuggestionStatus {
   pending
+  approved
 }
 
 model Suggestion {
