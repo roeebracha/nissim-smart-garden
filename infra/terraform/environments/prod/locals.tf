@@ -25,7 +25,9 @@ locals {
   budget_amount_usd   = 100
 
   # deploy.yml refuses prod from a branch other than main. The OIDC
-  # condition matches that.
+  # condition matches that. A pull_request plan cannot use this
+  # provider: the OIDC ref is refs/pull/N/merge, not refs/heads/main.
+  # The plan job authenticates with the dev pool and only runs plan.
   restrict_wif_to_main = true
 
   labels = {

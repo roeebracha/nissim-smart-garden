@@ -1,8 +1,8 @@
 # Docker repository for the backend image. Per environment, because dev
 # and prod are separate Terraform states in one GCP project and cannot
 # both own a single repository id.
-# deploy.yml still says ARTIFACT_REPO=nissim. The plan/deploy PR updates
-# that path. This module does not edit the workflow.
+# deploy.yml sets ARTIFACT_REPO to nissim-dev or nissim-prod on the
+# matching job. This module does not edit the workflow.
 
 terraform {
   required_version = ">= 1.5.0"

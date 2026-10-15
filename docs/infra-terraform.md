@@ -10,11 +10,12 @@ infra/terraform/
 ├── modules/
 │   ├── network/                  # VPC, subnet, firewall
 │   ├── database/                 # Cloud SQL instance + db + user
-│   ├── artifact-registry/        # Docker registry
+│   ├── artifact-registry/        # Docker registry (repo id: nissim-<env>)
 │   └── iam/                      # service accounts + Workload Identity Federation
-└── environments/
-    ├── dev/                      # root config -> modules, remote state ב-GCS
-    └── prod/
+├── environments/
+│   ├── dev/                      # root config -> modules, remote state ב-GCS
+│   └── prod/
+└── github/                       # GitHub environments + branch protection, state prefix github/
 ```
 לא `terraform workspace` — HashiCorp ממליצים נגד זה להפרדת סביבות (סיכון
 לערבוב state בטעות). תיקייה נפרדת per environment = state נפרד, בידוד אמיתי.
@@ -39,6 +40,12 @@ Auth Proxy — IP ציבורי אבל מוצפן mTLS ומאומת דרך IAM, �
 לא GCP service account JSON key כ-GitHub secret (anti-pattern — key ארוך-טווח
 שיכול לדלוף). GitHub Actions מקבל token זמני דרך OIDC. מוקם כבר במודול ה-IAM
 בשלב הזה, לפני שמגיעים ל-CI/CD בפועל, כדי לא לעשות refactor מאוחר יותר.
+
+הערכים של `WIF_PROVIDER` ו-`WIF_SERVICE_ACCOUNT` נכנסים כ-Environment
+variables ב-GitHub (לא Secrets, לא קובץ ב-git). הנתיב המלא, כולל מתי
+ה-plan ב-CI נשאר skipped, נמצא ב-[`git-workflow.md`](./git-workflow.md).
+ל-dev ול-prod יש service account ו-pool נפרדים. `deploy.yml` דוחף
+ל-Artifact Registry `nissim-dev` או `nissim-prod`, לא ל-repo בשם `nissim`.
 
 ## Decision: Backend לא רץ על Cloud Run — Compute Engine, כמו ה-Broker
 ה-Backend מחזיק MQTT subscription פתוח ורציף (decision #6, `architecture.md`) —
