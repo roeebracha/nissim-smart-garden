@@ -1,9 +1,9 @@
 // MlService — trains only (decision #20). Writes automation_rules
 // thresholds from recent readings. Never actuates.
 //
-// The three class methods below touch Prisma. The three standalone
-// functions at the bottom are pure (no DB) so each can be unit-tested with
-// a plain array of numbers, no Postgres required.
+// The class methods below touch Prisma. The standalone functions at the
+// bottom are pure (no DB) so each can be unit-tested with a plain array of
+// numbers, no Postgres required.
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
@@ -40,7 +40,12 @@ export class MlService {
   // Nightly, sequential (decision #20). One rule's failure is logged and
   // skipped so the rest of the batch still runs. A failed job leaves the
   // previous thresholds in place; Decision keeps using them.
-  @Cron(CronExpression.EVERY_DAY_AT_3AM, { name: 'ml-recalibrate' })
+  // 03:00 Asia/Jerusalem (decision #23): the container clock is not the
+  // garden clock, so the host timezone must not decide when this runs.
+  @Cron(CronExpression.EVERY_DAY_AT_3AM, {
+    name: 'ml-recalibrate',
+    timeZone: 'Asia/Jerusalem',
+  })
   async recalibrateRules(): Promise<void> {
     const rules = await this.findActiveRules();
     for (const rule of rules) {
@@ -84,13 +89,9 @@ export class MlService {
     const values = readings
       .map((reading) => reading.value)
       .sort((a, b) => a - b);
-    const proposed = deriveThresholds(
+    const next = calibrateThresholds(
       percentile(values, LOW_PERCENTILE),
       percentile(values, HIGH_PERCENTILE),
-      rule.operator,
-    );
-    const next = enforceSafetyLimits(
-      proposed,
       { onThreshold: rule.onThreshold, offThreshold: rule.offThreshold },
       rule.operator,
       rule.sensorType,
@@ -193,4 +194,94 @@ function stepToward(previous: number, target: number): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+// Decision #22. Readings come from a garden that already follows the rule,
+// so the percentile span sits inside today's on/off band and would tighten
+// it every night until MIN_GAP. Shift the band onto the new center, but
+// never store a narrower width than the one this run started with. Step,
+// domain clamp, and MIN_GAP still run. If that pass would shrink the stored
+// width, width wins and the step cap is dropped for this write.
+export function calibrateThresholds(
+  lowPercentile: number,
+  highPercentile: number,
+  previous: ThresholdPair,
+  operator: ThresholdOperator,
+  sensorType: string,
+): ThresholdPair {
+  const currentWidth = bandWidth(previous);
+  const percentileWidth = highPercentile - lowPercentile;
+  // When the new span is already at least as wide as today, use the
+  // percentile cuts themselves. Rebuilding them as center ± width/2 is
+  // the same band, but float error would move a cut like 9.8.
+  const proposed =
+    percentileWidth + 1e-9 >= currentWidth
+      ? deriveThresholds(lowPercentile, highPercentile, operator)
+      : deriveThresholds(
+          (lowPercentile + highPercentile) / 2 - currentWidth / 2,
+          (lowPercentile + highPercentile) / 2 + currentWidth / 2,
+          operator,
+        );
+  const stepped = enforceSafetyLimits(proposed, previous, operator, sensorType);
+  if (bandWidth(stepped) + 1e-9 >= currentWidth) {
+    return stepped;
+  }
+  return placeStoredWidth(proposed, previous, operator, sensorType);
+}
+
+function bandWidth(pair: ThresholdPair): number {
+  return Math.abs(pair.offThreshold - pair.onThreshold);
+}
+
+// The step cap moved an edge inward, and the domain clamp then cut the
+// other edge. Place today's width on the proposed center and slide the
+// whole band into the sensor domain instead of clipping one side. MIN_GAP
+// still applies; it only widens. If the domain cannot hold today's width,
+// keep the stored pair.
+function placeStoredWidth(
+  proposed: ThresholdPair,
+  previous: ThresholdPair,
+  operator: ThresholdOperator,
+  sensorType: string,
+): ThresholdPair {
+  const currentWidth = bandWidth(previous);
+  const center = (proposed.onThreshold + proposed.offThreshold) / 2;
+  const range = SENSOR_RANGE[sensorType];
+  const span = range
+    ? shiftIntoDomain(
+        center - currentWidth / 2,
+        center + currentWidth / 2,
+        range,
+      )
+    : { low: center - currentWidth / 2, high: center + currentWidth / 2 };
+  const placed = deriveThresholds(span.low, span.high, operator);
+  const repaired = enforceSafetyLimits(placed, placed, operator, sensorType);
+  if (bandWidth(repaired) + 1e-9 < currentWidth) {
+    return previous;
+  }
+  return repaired;
+}
+
+function shiftIntoDomain(
+  low: number,
+  high: number,
+  range: { min: number; max: number },
+): { low: number; high: number } {
+  const domain = range.max - range.min;
+  if (high - low >= domain - 1e-9) {
+    return { low: range.min, high: range.max };
+  }
+  let nextLow = low;
+  let nextHigh = high;
+  if (nextLow < range.min) {
+    const shift = range.min - nextLow;
+    nextLow += shift;
+    nextHigh += shift;
+  }
+  if (nextHigh > range.max) {
+    const shift = nextHigh - range.max;
+    nextLow -= shift;
+    nextHigh -= shift;
+  }
+  return { low: nextLow, high: nextHigh };
 }
