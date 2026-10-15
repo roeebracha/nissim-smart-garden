@@ -83,6 +83,66 @@ jobs:  # the required checks before merge
       - name: Run jest  # --passWithNoTests until the first *.spec.ts exists
         run: npx jest --passWithNoTests  # unit tests; do not fail if there are none yet
 
+  frontend-lint:  # oxlint — dashboard style/syntax (decision 24)
+    name: Frontend lint  # label in the GitHub checks list
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    defaults:  # defaults for every `run:` step in this job
+      run:  # apply only to shell steps, not to `uses:`
+        working-directory: frontend  # all `run:` steps in this job start in frontend/
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy the PR code onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+      - name: Setup Node 24  # same major as the backend job
+        uses: actions/setup-node@v4  # official Node installer
+        with:  # inputs for that action
+          node-version: '24'  # major version to install
+          cache: npm  # reuse downloaded packages between runs
+          cache-dependency-path: frontend/package-lock.json  # lockfile that defines the cache key
+      - name: Install deps  # exact versions from package-lock.json
+        run: npm ci  # clean install from the lockfile, not `npm install`
+      - name: Run oxlint  # fail on lint errors; no autofix
+        run: npm run lint  # oxlint --deny-warnings
+
+  frontend-typecheck:  # tsc — TypeScript errors in the dashboard
+    name: Frontend typecheck  # label in the GitHub checks list
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    defaults:  # defaults for every `run:` step in this job
+      run:  # apply only to shell steps, not to `uses:`
+        working-directory: frontend  # all `run:` steps in this job start in frontend/
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy the PR code onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+      - name: Setup Node 24  # same major as the backend job
+        uses: actions/setup-node@v4  # official Node installer
+        with:  # inputs for that action
+          node-version: '24'  # major version to install
+          cache: npm  # reuse downloaded packages between runs
+          cache-dependency-path: frontend/package-lock.json  # lockfile that defines the cache key
+      - name: Install deps  # exact versions from package-lock.json
+        run: npm ci  # clean install from the lockfile, not `npm install`
+      - name: Run tsc  # project references, no emit
+        run: npm run typecheck  # tsc -b
+
+  frontend-test:  # vitest — dashboard screen and the HTTP client
+    name: Frontend tests  # label in the GitHub checks list
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    defaults:  # defaults for every `run:` step in this job
+      run:  # apply only to shell steps, not to `uses:`
+        working-directory: frontend  # all `run:` steps in this job start in frontend/
+    steps:  # ordered list of actions/commands
+      - name: Checkout  # copy the PR code onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+      - name: Setup Node 24  # same major as the backend job
+        uses: actions/setup-node@v4  # official Node installer
+        with:  # inputs for that action
+          node-version: '24'  # major version to install
+          cache: npm  # reuse downloaded packages between runs
+          cache-dependency-path: frontend/package-lock.json  # lockfile that defines the cache key
+      - name: Install deps  # exact versions from package-lock.json
+        run: npm ci  # clean install from the lockfile, not `npm install`
+      - name: Run vitest  # mocked pots, charts, and the approve client
+        run: npm run test  # vitest run
+
   docker:  # image must build even if npm scripts pass
     name: Docker  # label in the GitHub checks list
     runs-on: ubuntu-latest  # GitHub-hosted Linux VM
