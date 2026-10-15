@@ -1,5 +1,8 @@
 # Required PR checks. Policy: docs/git-workflow.md.
 # Required PR gates only. No separate AI review workflow (decision #17).
+# Job "Terraform plan" is not a required check. It skips while
+# WIF_PROVIDER or WIF_SERVICE_ACCOUNT is empty so an unset variable
+# cannot turn the pull request red. docs/git-workflow.md.
 
 name: CI  # title shown in GitHub Actions
 
@@ -103,7 +106,7 @@ jobs:  # the required checks before merge
       - name: Lint commit messages  # feat:/fix:/infra: etc. — see commitlint.config.mjs
         uses: wagoid/commitlint-github-action@v6  # compares PR commits against the config
 
-  terraform:  # fmt + validate only; plan needs real env configs + WIF (later)
+  terraform:  # fmt + validate. Plan is the separate job below, and it is not required.
     name: Terraform  # label in the GitHub checks list
     runs-on: ubuntu-latest  # GitHub-hosted Linux VM
     steps:  # ordered list of actions/commands
@@ -132,3 +135,151 @@ jobs:  # the required checks before merge
         run: |  # two commands in one step
           terraform init -backend=false  # download providers; do not talk to GCS state
           terraform validate  # syntax/schema check, no GCP apply
+      - name: Validate github  # environments + branch protection — no apply, no token
+        working-directory: infra/terraform/github  # GitHub provider root
+        run: |  # two commands in one step
+          terraform init -backend=false  # download the GitHub provider; do not talk to GCS
+          terraform validate  # schema check; does not call the GitHub API
+
+  # Not a required check. Name must stay out of github_branch_protection
+  # contexts until WIF is configured and this job is actually running.
+  terraform-plan:
+    name: Terraform plan  # check name — do not add this to branch protection yet
+    # Same skip as deploy.yml. Empty vars skip the job; they do not fail it.
+    # environment: dev is what makes these the dev Environment variables.
+    # Prod WIF requires refs/heads/main, and a pull_request ref is
+    # refs/pull/N/merge, so this job cannot mint a prod token.
+    if: ${{ vars.WIF_PROVIDER != '' && vars.WIF_SERVICE_ACCOUNT != '' }}
+    runs-on: ubuntu-latest  # GitHub-hosted Linux VM
+    environment: dev  # no required reviewer; vars are dev's WIF pair
+    permissions:  # job permissions replace the workflow permissions
+      contents: read  # checkout
+      id-token: write  # OIDC token for Workload Identity Federation
+      pull-requests: write  # comment the plan; the token is the workflow token, not a PAT in git
+    env:  # Terraform reads TF_VAR_* itself. The value is not a secret.
+      TF_VAR_billing_account_id: ${{ vars.TF_VAR_billing_account_id }}
+    steps:
+      - name: Checkout  # copy the PR code onto the VM
+        uses: actions/checkout@v4  # official GitHub checkout action
+      - name: Require billing account id  # plan cannot prompt, and the id is not in git
+        id: billing  # later steps read this outcome
+        run: |  # fail with the click-path hint; do not print the value
+          if [ -z "$TF_VAR_billing_account_id" ]; then
+            echo "Set dev Environment variable TF_VAR_billing_account_id (Variables, not Secrets). See docs/git-workflow.md." | tee "$GITHUB_WORKSPACE/plan-error.txt"
+            exit 1
+          fi
+      - name: Authenticate to Google Cloud  # WIF credentials file for Terraform, not a JSON key
+        id: auth  # plan steps run only after this succeeds
+        if: steps.billing.outcome == 'success'  # implied success(); skip when the id is missing
+        uses: google-github-actions/auth@v2  # official Google auth action
+        with:  # inputs for that action
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}  # dev Environment variable
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}  # dev Environment variable
+      - name: Setup Terraform  # same version as the validate job
+        id: setup  # plan steps run only after the CLI is installed
+        if: steps.auth.outcome == 'success'  # do not init without credentials
+        uses: hashicorp/setup-terraform@v3  # official Terraform installer
+        with:  # inputs for that action
+          terraform_version: 1.15.8  # match the Terraform job
+          terraform_wrapper: false  # real exit codes; the comment step posts the summary
+      - name: Plan dev  # read-only — never terraform apply on a pull request
+        id: plan_dev  # outcome is reported in the PR comment
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}  # !cancelled() so a later root still plans
+        continue-on-error: true  # still plan prod and comment if this root fails
+        working-directory: infra/terraform/environments/dev  # dev root module
+        run: |  # init against GCS, then plan; the binary plan file is deleted
+          set +e
+          set -o pipefail
+          {
+            terraform init -input=false
+            terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+          } 2>&1 | tee "$GITHUB_WORKSPACE/plan-dev.txt"
+          status=${PIPESTATUS[0]}
+          rm -f tfplan
+          exit "$status"
+      - name: Plan prod  # read-only plan of the prod root, still the dev WIF identity
+        id: plan_prod  # outcome is reported in the PR comment
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}  # still plan prod if the dev plan failed
+        continue-on-error: true  # the comment should show a prod failure too
+        working-directory: infra/terraform/environments/prod  # prod root module
+        run: |  # read-only. Prod changes ship from deploy.yml on main.
+          set +e
+          set -o pipefail
+          {
+            terraform init -input=false
+            terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+          } 2>&1 | tee "$GITHUB_WORKSPACE/plan-prod.txt"
+          status=${PIPESTATUS[0]}
+          rm -f tfplan
+          exit "$status"
+      - name: Comment plan on the pull request  # sticky comment; update in place
+        if: always()  # post the summary whether the plans failed or passed
+        uses: actions/github-script@v7  # official GitHub script action; uses GITHUB_TOKEN
+        env:  # step outcomes only — plan text is read from files, not interpolated
+          DEV_OUTCOME: ${{ steps.plan_dev.outcome }}
+          PROD_OUTCOME: ${{ steps.plan_prod.outcome }}
+          BILLING_OUTCOME: ${{ steps.billing.outcome }}
+        with:
+          script: |
+            const fs = require('fs')
+            const marker = '<!-- nissim-terraform-plan -->'
+            const max = 20000
+            function read(path) {
+              if (!fs.existsSync(path)) return '_No output._'
+              let text = fs.readFileSync(path, 'utf8').replace(/\r\n/g, '\n').replace(/```/g, "'''")
+              if (text.length > max) {
+                text = text.slice(0, max) + '\n\n… truncated. The job log has the full plan.'
+              }
+              return text
+            }
+            const dev = read(process.env.GITHUB_WORKSPACE + '/plan-dev.txt')
+            const prod = read(process.env.GITHUB_WORKSPACE + '/plan-prod.txt')
+            const billing = read(process.env.GITHUB_WORKSPACE + '/plan-error.txt')
+            const body = [
+              marker,
+              '## Terraform plan',
+              '',
+              'Read-only. This job does not apply. Prod apply stays on `main` in `deploy.yml`.',
+              '',
+              '| Root | Result |',
+              '| --- | --- |',
+              '| billing account id | ' + process.env.BILLING_OUTCOME + ' |',
+              '| dev | ' + process.env.DEV_OUTCOME + ' |',
+              '| prod | ' + process.env.PROD_OUTCOME + ' |',
+              '',
+              billing === '_No output._' ? '' : '### billing\n\n' + billing,
+              '',
+              '<details><summary>dev</summary>',
+              '',
+              '```',
+              dev,
+              '```',
+              '',
+              '</details>',
+              '',
+              '<details><summary>prod</summary>',
+              '',
+              '```',
+              prod,
+              '```',
+              '',
+              '</details>',
+              '',
+            ].join('\n')
+            const { owner, repo } = context.repo
+            const issue_number = context.issue.number
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            })
+            const existing = comments.find((comment) => comment.body && comment.body.includes(marker) && comment.user && comment.user.login === 'github-actions[bot]')
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body })
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body })
+            }
+      - name: Fail when a plan failed  # continue-on-error above must not leave the job green
+        if: ${{ always() && (steps.billing.outcome == 'failure' || steps.plan_dev.outcome == 'failure' || steps.plan_prod.outcome == 'failure') }}
+        run: exit 1  # the comment is already posted

@@ -29,7 +29,7 @@ output "sql_iam_database_user" {
 }
 
 output "artifact_repository_id" {
-  description = "Docker repository id. deploy.yml still uses nissim until the plan/deploy PR."
+  description = "Docker repository id (nissim-dev). deploy.yml job env ARTIFACT_REPO."
   value       = module.artifact_registry.repository_id
 }
 

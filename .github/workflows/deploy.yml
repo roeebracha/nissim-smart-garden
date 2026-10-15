@@ -9,13 +9,17 @@
 # Auth is Workload Identity Federation — no GCP JSON key secret
 # (docs/infra-terraform.md). Set these as GitHub Environment variables
 # (Settings → Environments → dev / prod):
-#   WIF_PROVIDER         — full provider resource name
-#   WIF_SERVICE_ACCOUNT  — github-actions@nissim-garden.iam.gserviceaccount.com
+#   WIF_PROVIDER         — terraform output workload_identity_provider
+#   WIF_SERVICE_ACCOUNT  — terraform output github_actions_service_account
+# Dev and prod each have their own values (github-actions-dev@... and
+# github-actions-prod@...). Paste the output for that environment.
 # Add a required reviewer on the `prod` environment or that job will
 # not wait. Dev should have no required reviewer.
 #
-# Order: terraform apply first (creates Artifact Registry), then push the
-# image. Compute Engine VMs are not in this stage (infra-terraform.md).
+# Order: terraform apply first (creates Artifact Registry repos
+# nissim-dev and nissim-prod), then push the image into that
+# environment's repo. Compute Engine VMs are not in this stage
+# (infra-terraform.md).
 #
 # Dev is one shared GCP environment. The last successful branch deploy
 # wins — two feature branches cannot sit on dev at the same time.
@@ -35,8 +39,7 @@ permissions:  # OIDC for WIF; no contents: write
 env:  # shared GCP coordinates (bootstrap/main.tf)
   GCP_PROJECT_ID: nissim-garden  # one GCP project for dev + prod
   GCP_REGION: us-central1  # match the google provider region
-  ARTIFACT_REPO: nissim  # Artifact Registry repository id
-  IMAGE_NAME: backend  # image name inside that repository
+  IMAGE_NAME: backend  # image name inside the per-environment repository
 
 jobs:  # dev on every branch; prod only from main
   dev:  # shared dev — last successful deploy from any branch wins
@@ -46,6 +49,8 @@ jobs:  # dev on every branch; prod only from main
     if: ${{ vars.WIF_PROVIDER != '' && vars.WIF_SERVICE_ACCOUNT != '' }}
     runs-on: ubuntu-latest  # GitHub-hosted Linux VM
     environment: dev  # env-scoped WIF vars; no required reviewer
+    env:
+      ARTIFACT_REPO: nissim-dev  # module.artifact_registry repository id for dev
     concurrency:  # one dev apply at a time across all branches
       group: deploy-dev  # shared lock — not per-branch
       cancel-in-progress: false  # do not kill terraform apply mid-run
@@ -87,10 +92,13 @@ jobs:  # dev on every branch; prod only from main
   prod:  # never from a feature branch — live traffic stays on main
     name: Prod  # label in the GitHub checks list
     # Same WIF gate as Dev — skip until Environment vars exist.
+    # github.ref is the branch that was pushed. A feature branch never applies prod.
     if: ${{ github.ref == 'refs/heads/main' && vars.WIF_PROVIDER != '' && vars.WIF_SERVICE_ACCOUNT != '' }}
     needs: [dev]  # do not start until the dev job is green
     runs-on: ubuntu-latest  # GitHub-hosted Linux VM
     environment: prod  # GitHub pauses until a required reviewer approves
+    env:
+      ARTIFACT_REPO: nissim-prod  # module.artifact_registry repository id for prod
     concurrency:  # one prod apply at a time
       group: deploy-prod  # separate lock from dev
       cancel-in-progress: false  # do not kill terraform apply mid-run
