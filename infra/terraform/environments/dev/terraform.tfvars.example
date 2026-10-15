@@ -1,0 +1,4 @@
+# Not loaded by Terraform. Copy to terraform.tfvars (gitignored) or export
+# TF_VAR_billing_account_id. The value below is a shape example, not an account.
+# Do not put secret values in this file or in any tfvars file.
+billing_account_id = "000000-000000-000000"

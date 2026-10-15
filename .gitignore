@@ -10,3 +10,7 @@ coverage/
 *.tfstate
 *.tfstate.backup
 .terraform/
+
+# Apply inputs (billing account id). Example files stay in git.
+*.tfvars
+!*.tfvars.example
