@@ -30,7 +30,7 @@
 
 ## PR checks (required status checks)
 כל PR חייב לעבור לפני merge (`.github/workflows/ci.yml`):
-- Lint — `npm run lint:check` ב-backend (eslint, בלי `--fix`). אין frontend עדיין.
+- Lint — `npm run lint:check` ב-backend (eslint, בלי `--fix`). ב-`frontend/` רצים `npm run lint`, `npm run typecheck` ו-`npm run test` (Vite + React + shadcn/ui, decision 24).
 - Type check — `npm run typecheck` (`tsc --noEmit`)
 - Unit tests — jest (`--passWithNoTests` כל עוד אין `*.spec.ts`)
 - `docker build` של `backend/`

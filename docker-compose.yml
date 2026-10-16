@@ -57,6 +57,9 @@ services:
       # same networking rule as postgres.
       MQTT_BROKER_HOST: ${MQTT_BROKER_HOST}
       MQTT_BROKER_PORT: ${MQTT_BROKER_PORT}
+      # Vite dev server. Unset in the shell still passes this default so
+      # local Compose allows the dashboard and nothing else.
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
     ports:
       - "3000:3000"
     depends_on:
