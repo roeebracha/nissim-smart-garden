@@ -1,6 +1,15 @@
 // OperationService — only door that may change the physical world
 // (decisions #2, #6, #19). Decision decides; this module actuates.
-import { Injectable, Logger } from '@nestjs/common';
+//
+// Max-on timers live in this process. Startup re-arms them from
+// desiredState / desiredSince, and shutdown clears them, so a restart
+// cannot leave a pump on with no force-off (decision #21).
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import {
   Actuator,
   ActuatorState,
@@ -12,7 +21,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const MAX_ON_MS = 5000;
 
 @Injectable()
-export class OperationService {
+export class OperationService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OperationService.name);
   private readonly safetyTimers = new Map<
     number,
@@ -23,6 +32,46 @@ export class OperationService {
     private readonly prisma: PrismaService,
     private readonly mqtt: MqttConnection,
   ) {}
+
+  // Actuators still desired on after a restart have no in-memory timer.
+  // Overdue ones are forced off in this method. The rest keep the time
+  // left under MAX_ON_MS. A zero delay would be another timer; the
+  // overdue path does not use one.
+  async onModuleInit(): Promise<void> {
+    const actuatorsOn = await this.prisma.actuator.findMany({
+      where: { desiredState: 'on' },
+    });
+    const now = Date.now();
+
+    for (const actuator of actuatorsOn) {
+      const elapsed = now - actuator.desiredSince.getTime();
+      if (elapsed >= MAX_ON_MS) {
+        this.logger.warn(
+          `Safety: actuator ${actuator.id} was still desired on at startup, past ${MAX_ON_MS}ms; forcing off`,
+        );
+        await this.requestActuation({
+          actuator,
+          nextState: 'off',
+          source: 'rule',
+        });
+        continue;
+      }
+
+      this.armSafetyTimer(
+        actuator.id,
+        'rule',
+        Math.max(0, MAX_ON_MS - elapsed),
+      );
+    }
+  }
+
+  // A timeout must not run after Nest has torn this provider down.
+  onModuleDestroy(): void {
+    for (const timer of this.safetyTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.safetyTimers.clear();
+  }
 
   async requestActuation(args: {
     actuator: Actuator;
@@ -79,12 +128,7 @@ export class OperationService {
     });
 
     if (nextState === 'on') {
-      this.safetyTimers.set(
-        actuator.id,
-        setTimeout(() => {
-          void this.forceOffAfterMaxOn(actuator.id, source);
-        }, MAX_ON_MS),
-      );
+      this.armSafetyTimer(actuator.id, source, MAX_ON_MS);
     }
   }
 
@@ -108,6 +152,20 @@ export class OperationService {
       nextState: 'off',
       source,
     });
+  }
+
+  private armSafetyTimer(
+    actuatorId: number,
+    source: DecisionSource,
+    delayMs: number,
+  ): void {
+    this.clearSafetyTimer(actuatorId);
+    this.safetyTimers.set(
+      actuatorId,
+      setTimeout(() => {
+        void this.forceOffAfterMaxOn(actuatorId, source);
+      }, delayMs),
+    );
   }
 
   private clearSafetyTimer(actuatorId: number): void {
