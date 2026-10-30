@@ -2,13 +2,8 @@
 // MQTT subscriber calls ingest() with deviceId from the topic + parsed JSON.
 import { Injectable } from '@nestjs/common';
 import { DecisionService } from '../decision/decision.service';
+import { parseReadingPayload } from '../mqtt/contract';
 import { PrismaService } from '../prisma/prisma.service';
-
-type ParsedReading = {
-  sensorName: string;
-  value: number;
-  recordedAt: Date;
-};
 
 @Injectable()
 export class IngestionService {
@@ -40,32 +35,4 @@ export class IngestionService {
 
     await this.decision.evaluate(reading);
   }
-}
-
-function parseReadingPayload(payload: unknown): ParsedReading {
-  if (payload === null || typeof payload !== 'object') {
-    throw new Error('Reading payload must be an object');
-  }
-
-  const record = payload as Record<string, unknown>;
-  const sensorName = record.sensor;
-  const value = record.value;
-  const recordedAtRaw = record.recorded_at;
-
-  if (typeof sensorName !== 'string' || sensorName.length === 0) {
-    throw new Error('Reading payload.sensor must be a non-empty string');
-  }
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error('Reading payload.value must be a finite number');
-  }
-  if (typeof recordedAtRaw !== 'string') {
-    throw new Error('Reading payload.recorded_at must be an ISO date string');
-  }
-
-  const recordedAt = new Date(recordedAtRaw);
-  if (Number.isNaN(recordedAt.getTime())) {
-    throw new Error('Reading payload.recorded_at is not a valid date');
-  }
-
-  return { sensorName, value, recordedAt };
 }
