@@ -4,6 +4,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  hysteresisError,
+  ThresholdOperatorName,
+} from '../rules/threshold-band';
+import {
   ACTUATOR_TYPES,
   GET_RECENT_READINGS,
   MAX_READING_DAYS,
@@ -14,8 +18,6 @@ import {
 } from './constants';
 
 type ToolScope = { planterId?: number };
-
-type ThresholdOperatorName = 'less_than' | 'greater_than';
 
 @Injectable()
 export class LlmTools {
@@ -174,23 +176,6 @@ function oldestRecordedAt(rows: { recordedAt: Date }[]): string | null {
     if (oldest === null || row.recordedAt < oldest) oldest = row.recordedAt;
   }
   return oldest === null ? null : oldest.toISOString();
-}
-
-// less_than turns on below on_threshold and off above off_threshold, so
-// on must sit below off. greater_than is the mirror. An inverted band
-// chatters: the same reading turns the actuator on and then off.
-function hysteresisError(
-  operator: ThresholdOperatorName,
-  onThreshold: number,
-  offThreshold: number,
-): string | null {
-  if (operator === 'less_than' && !(onThreshold < offThreshold)) {
-    return 'for less_than, on_threshold must be below off_threshold';
-  }
-  if (operator === 'greater_than' && !(onThreshold > offThreshold)) {
-    return 'for greater_than, on_threshold must be above off_threshold';
-  }
-  return null;
 }
 
 function parseOneOf<T extends string>(
