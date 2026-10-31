@@ -1,10 +1,12 @@
 # Architecture decisions
 
-Single log of architecture decisions, newest first. Numbers **1–20** are the original numbers in [`docs/architecture.md`](../architecture.md). Nothing in this file adds a decision those sources do not contain.
+Single log of architecture decisions, newest first. Numbers **1–20** are the original numbers in [`docs/architecture.md`](../architecture.md).
 
-**21, 22, and 23** had no number in the repo. They are open follow-ups from pull-request reviews, recorded here as **Proposed**. The numbers are the next integers, in the order the reviews raised them: 21 on 2026-09-13, then 22 and 23 on 2026-10-07. Because 20 was written on 2026-09-16, date order and number order diverge: 20 sits above 21.
+**21, 22, and 23** had no number in the repo. They are follow-ups from pull-request reviews. The numbers are the next integers, in the order the reviews raised them: 21 on 2026-09-13, then 22 and 23 on 2026-10-07. They were first recorded here as **Proposed**. Roee accepted them in chat on 16 Oct 2026. The date on each of those rows is the acceptance date, 2026-10-16. The original review date stays in the row.
 
-Dates are the author date of the commit that recorded the decision, unless a row says otherwise. Status is only **Accepted** or **Proposed**. Decision 8 was later undone by decision 17; both stay Accepted, and 17’s consequences say the workflow is gone.
+**24** recorded a frontend in this repo. It is not a numbered decision in `docs/architecture.md`. Roee approved it in chat on 16 Oct 2026. **25** supersedes it. On 31 Oct 2026 Roee decided this repository is backend-only and that the UI lives in the separate home-finance app.
+
+Dates are the author date of the commit that recorded the decision, unless a row says otherwise. Status is only **Accepted** or **Proposed**. Decision 8 was later undone by decision 17; both stay Accepted, and 17’s consequences say the workflow is gone. Decision 24 was later superseded by decision 25; both stay Accepted, and 25’s consequences say this repository has no frontend.
 
 Infrastructure choices in [`docs/infra-terraform.md`](../infra-terraform.md) were never numbered. They are at the bottom, under the same headings, without invented numbers.
 
@@ -12,10 +14,12 @@ Infrastructure choices in [`docs/infra-terraform.md`](../infra-terraform.md) wer
 
 | Number | Date | Status | Title |
 |---|---|---|---|
-| 23 | 2026-10-07 | Proposed | Run the 03:00 calibration cron in Asia/Jerusalem |
-| 22 | 2026-10-07 | Proposed | Nightly calibration never narrows the on/off band |
+| 25 | 2026-10-31 | Accepted | This repository is backend-only; UI stays in home-finance |
+| 24 | 2026-10-16 | Accepted | Frontend chosen as React + shadcn/ui (superseded by 25) |
+| 23 | 2026-10-16 | Accepted | Run the 03:00 calibration cron in Asia/Jerusalem |
+| 22 | 2026-10-16 | Accepted | Nightly calibration never narrows the on/off band |
+| 21 | 2026-10-16 | Accepted | Re-arm the pump max-on timer on startup and clear it on destroy |
 | 20 | 2026-09-16 | Accepted | ML batch calibrates thresholds inside the backend and never actuates |
-| 21 | 2026-09-13 | Proposed | Re-arm the pump max-on timer on startup and clear it on destroy |
 | 19 | 2026-09-12 | Accepted | Thin Operation, and one MQTT client for subscribe and publish |
 | 18 | 2026-09-12 | Accepted | Build the backend / AI / infra spine; edge stays optional |
 | 17 | 2026-09-10 | Accepted | Remove the Claude PR-review workflow |
@@ -38,32 +42,73 @@ Infrastructure choices in [`docs/infra-terraform.md`](../infra-terraform.md) wer
 | 1 | 2026-08-15 | Accepted | MQTT with self-hosted Mosquitto |
 | — | 2026-08-15 | Accepted | Infrastructure decisions with no number (see end) |
 
+## 25. This repository is backend-only; UI stays in home-finance
+
+- **Number:** 25
+- **Date:** 2026-10-31
+- **Status:** Accepted
+- **Context:** Decision 18 left a frontend optional. Decision 24 then chose Vite + React + TypeScript + shadcn/ui in `frontend/` for a garden dashboard. PR #17 built that dashboard on this branch and was closed on 2026-10-31 without merging. The garden UI already lives in a separate app, home-finance (React/Vite + Express on Vercel). This repository’s subject is the NestJS backend, Postgres, and MQTT.
+- **Options:**
+  - Keep a garden frontend in this repo, as decision 24 describes.
+  - No frontend in this repo. home-finance is the only UI. It calls this backend’s HTTP API later.
+- **Decision:** nissim-smart-garden is backend-only. NestJS, Postgres, and MQTT run as Docker services. This repository has no frontend of its own. All UI lives in home-finance. That app will later call this backend’s secured HTTP API: CORS for the home-finance origin, authentication, and explicit authorization for control actions.
+- **Consequences:** Decision 24 stays in the log as history and does not authorize a `frontend/` directory. PR #17 is closed and is not merged. There is no Next.js app and no Vite app in this repo. The later HTTP API allows the home-finance origin only, requires authentication, and requires an explicit authorization check before a control action. The browser does not publish MQTT. How authentication and authorization are implemented is a later decision. Decision 18’s optional-frontend item is closed by this entry.
+- **Source:** Decided by Roee on 2026-10-31. Dashboard PR #17 (closed): https://github.com/roeebracha/nissim-smart-garden/pull/17
+
+## 24. Frontend chosen as React + shadcn/ui
+
+- **Number:** 24
+- **Date:** 2026-10-16
+- **Status:** Accepted
+- **Context:** Decision 18 left the frontend optional (item 6 in this log’s remaining order; step 4 of the remaining list in [`docs/architecture.md`](../architecture.md)). The tools section of that doc lists Next.js as under discussion, not as a numbered decision. Roee required a very simple dashboard tonight. Decision 25 later superseded this choice.
+- **Options:**
+  - Next.js.
+  - Vite + React + TypeScript + shadcn/ui.
+- **Decision:** Vite + React + TypeScript + shadcn/ui, in `frontend/`, after the backend in decision 18’s order.
+- **Consequences:** The text at the time pointed at a follow-up pull request that would build the dashboard and call `POST /suggestions/:id/approve`, and it ruled out a Next.js app. That build was PR #17. Decision 25 (2026-10-31) supersedes this entry: PR #17 was closed without merging, and this repository does not gain a `frontend/`.
+- **Source:** Approved by Roee in chat on 16 Oct 2026. Superseded by decision 25.
+
 ## 23. Run the 03:00 calibration cron in Asia/Jerusalem
 
 - **Number:** 23
-- **Date:** 2026-10-07
-- **Status:** Proposed
+- **Date:** 2026-10-16 (accepted; proposed on 2026-10-07)
+- **Status:** Accepted
 - **Context:** Review of PR #10 (implemented calibration, commit `6065ff7`) on 2026-10-07. `@Cron` uses the process clock. The review says the backend container is probably UTC, so “3AM” would be 06:00 in Israel. It cites 12-factor: behavior comes from config, not from the host. Decision 20 already names a nightly 03:00 cron and does not name a timezone. The merged decorator is `@Cron(CronExpression.EVERY_DAY_AT_3AM, { name: 'ml-recalibrate' })` with no `timeZone`.
 - **Options:**
   - Leave `EVERY_DAY_AT_3AM` on the process timezone (what merged).
   - Set `timeZone: 'Asia/Jerusalem'` on that cron. The review gives this as the fix.
-- **Decision:** Run the 03:00 cron in `Asia/Jerusalem`. Not accepted. PR #10 merged on 2026-10-08 without the option.
-- **Consequences:** Until this is accepted and implemented, the job follows the container clock. The review’s sketch is `timeZone: 'Asia/Jerusalem'` on the existing `EVERY_DAY_AT_3AM` cron named `ml-recalibrate`.
-- **Source:** PR #10 review comment on `backend/src/ml/ml.service.ts`, 2026-10-07. https://github.com/roeebracha/nissim-smart-garden/pull/10
+- **Decision:** Run the 03:00 cron in `Asia/Jerusalem`. Accepted on 2026-10-16. PR #10 merged on 2026-10-08 without the option; this entry records acceptance, and the code change is a separate pull request.
+- **Consequences:** Until this is implemented, the job follows the container clock. The review’s sketch is `timeZone: 'Asia/Jerusalem'` on the existing `EVERY_DAY_AT_3AM` cron named `ml-recalibrate`.
+- **Source:** Accepted from Roee’s overnight instruction in chat on 16 Oct 2026. Originally proposed in the PR #10 review comment on `backend/src/ml/ml.service.ts`, 2026-10-07. https://github.com/roeebracha/nissim-smart-garden/pull/10
 
 ## 22. Nightly calibration never narrows the on/off band
 
 - **Number:** 22
-- **Date:** 2026-10-07
-- **Status:** Proposed
+- **Date:** 2026-10-16 (accepted; proposed on 2026-10-07)
+- **Status:** Accepted
 - **Context:** Same PR #10 review, same day, marked “worth deciding before merge.” Readings come from a garden that is already following the rule, so the 20th and 80th percentiles sit inside the current on/off band. Each night the band gets tighter until `MIN_GAP` (5). A 5-point band turns the pump on and off much more often, which is what hysteresis was there to prevent. The merged job still writes percentiles after the step cap, domain clamp, and gap repair, and it has no width guard.
 - **Options:**
   - Keep the current write path (step, domain, gap).
   - Never let a run make the band narrower than it is today. The review’s sketch shifts the band around the center of the new percentiles and sets width to `max(high - low, currentWidth)` before `deriveThresholds`.
   - A per-sensor minimum band, named in the same comment as another possible guard.
-- **Decision:** Add a guard so nightly calibration never narrows the on/off band. Not accepted. The pull request merged the next day without it.
-- **Consequences:** Closed-loop percentiles can shrink the band down to the minimum gap and short-cycle the pump. The review asks for a test that runs `recalibrateRule` several times on readings spread evenly between the current on and off thresholds.
-- **Source:** PR #10 review comment on `backend/src/ml/ml.service.ts`, 2026-10-07. https://github.com/roeebracha/nissim-smart-garden/pull/10
+- **Decision:** Add a guard so nightly calibration never narrows the on/off band. Accepted on 2026-10-16. The pull request merged the next day without it; this entry records acceptance, and the code change is a separate pull request.
+- **Consequences:** Closed-loop percentiles can shrink the band down to the minimum gap and short-cycle the pump until the guard lands. The review asks for a test that runs `recalibrateRule` several times on readings spread evenly between the current on and off thresholds.
+- **Source:** Accepted from Roee’s overnight instruction in chat on 16 Oct 2026. Originally proposed in the PR #10 review comment on `backend/src/ml/ml.service.ts`, 2026-10-07. https://github.com/roeebracha/nissim-smart-garden/pull/10
+
+## 21. Re-arm the pump max-on timer on startup and clear it on destroy
+
+- **Number:** 21
+- **Date:** 2026-10-16 (accepted; proposed on 2026-09-13)
+- **Status:** Accepted
+- **Context:** Educational reviews on PR #8 (2026-09-13), repeated on PR #9 after it merged, and still listed as an open should-fix on `main` in the PR #10 review (2026-09-16). `safetyTimers` is a `Map` in `OperationService`. `MAX_ON_MS` is 5000. After a restart (deploy, crash, or `docker compose restart`), Postgres can still say `desiredState` is `on` while the map is empty. Decision does not call Operation again while the rule still wants `on`, so nothing schedules the force-off. The check on the way in almost never runs for Decision, because Decision only calls when `nextState` differs from `desiredState`. The timer is the real max-on path for rules.
+- **Options:**
+  - Keep timers in process memory only (what PR #9 merged).
+  - On startup (`OnModuleInit`), load actuators whose `desiredState` is `on`. If `desiredSince` is already at least `MAX_ON_MS` ago, force `off` through the same door. Otherwise schedule the remaining time (`MAX_ON_MS - elapsed`). The PR #9 sketch uses `Math.max(0, MAX_ON_MS - elapsed)` and says to run the overdue case immediately.
+  - On shutdown (`OnModuleDestroy`), clear every timer in the map so a timeout does not run after Nest has torn the providers down.
+  The review treats boot re-arm and destroy-clear as one fix. A separate soft note, not this proposal, suggested a future `DecisionSource` value `safety` for the force-off audit row. The sketches pass `'rule'`.
+- **Decision:** Re-arm the pump max-on timer on startup (`OnModuleInit`) from `desiredState` / `desiredSince`, and clear timers on destroy. Accepted on 2026-10-16. `OperationService` on `main` still has neither hook; this entry records acceptance, and the code change is a separate pull request.
+- **Consequences:** Until this lands in code, a restart can leave the pump desired-on with no force-off, and a timeout can fire into a destroyed Nest context. [`AGENTS.md`](../../AGENTS.md) states timer survival as a safety rule.
+- **Source:** Accepted from Roee’s overnight instruction in chat on 16 Oct 2026. Originally proposed in the PR #8 and PR #9 reviews, `backend/src/operation/operation.service.ts`, 2026-09-13. https://github.com/roeebracha/nissim-smart-garden/pull/9
 
 ## 20. ML batch calibrates thresholds inside the backend and never actuates
 
@@ -83,21 +128,6 @@ Infrastructure choices in [`docs/infra-terraform.md`](../infra-terraform.md) wer
   - Recommended defaults, tunable and not schema: `WINDOW_DAYS=7`, `MIN_SAMPLES=50`, `MIN_GAP=5`, max step about 10 sensor units, nightly cron at 03:00. Cuts at the 0.2 and 0.8 percentiles, Hyndman–Fan type 7. Domains: moisture 0–100, temperature 0–50, light 0–100000. An unknown sensor type gets no domain clamp. For `less_than`, on is the low percentile and off is higher. For `greater_than`, the reverse.
 - **Consequences:** The job sorts a few thousand rows, so a separate process would be the same kind of over-building decision 3 refused. If the cron fails, Decision keeps the old thresholds. Percentiles stay explainable and tolerate outliers. There are no labels for a supervised model. The loop is closed on purpose: the history is the world the current policy already created, not a botanical ground truth. PR #10 implemented this inside the backend, using `receivedAt` (server clock) for the window, and continuing the batch when one rule throws. It does not call Operation. The “without light/temperature” line and the domain list for temperature and light are both in this decision; the merged code calibrates whatever `sensorType` the rule has, using only that type’s readings. Timezone and the non-narrowing band guard were left open (decisions 23 and 22).
 - **Source:** `docs/architecture.md` decision 20; commit `147143050` (2026-09-16) “Document decision #20”; learning log dated 2026-09-13; PR #10.
-
-## 21. Re-arm the pump max-on timer on startup and clear it on destroy
-
-- **Number:** 21
-- **Date:** 2026-09-13
-- **Status:** Proposed
-- **Context:** Educational reviews on PR #8 (2026-09-13), repeated on PR #9 after it merged, and still listed as an open should-fix on `main` in the PR #10 review (2026-09-16). `safetyTimers` is a `Map` in `OperationService`. `MAX_ON_MS` is 5000. After a restart (deploy, crash, or `docker compose restart`), Postgres can still say `desiredState` is `on` while the map is empty. Decision does not call Operation again while the rule still wants `on`, so nothing schedules the force-off. The check on the way in almost never runs for Decision, because Decision only calls when `nextState` differs from `desiredState`. The timer is the real max-on path for rules.
-- **Options:**
-  - Keep timers in process memory only (what PR #9 merged).
-  - On startup (`OnModuleInit`), load actuators whose `desiredState` is `on`. If `desiredSince` is already at least `MAX_ON_MS` ago, force `off` through the same door. Otherwise schedule the remaining time (`MAX_ON_MS - elapsed`). The PR #9 sketch uses `Math.max(0, MAX_ON_MS - elapsed)` and says to run the overdue case immediately.
-  - On shutdown (`OnModuleDestroy`), clear every timer in the map so a timeout does not run after Nest has torn the providers down.
-  The review treats boot re-arm and destroy-clear as one fix. A separate soft note, not this proposal, suggested a future `DecisionSource` value `safety` for the force-off audit row. The sketches pass `'rule'`.
-- **Decision:** Re-arm the pump max-on timer on startup (`OnModuleInit`) from `desiredState` / `desiredSince`, and clear timers on destroy. Not accepted. `OperationService` on `main` still has neither hook.
-- **Consequences:** Until this lands, a restart can leave the pump desired-on with no force-off, and a timeout can fire into a destroyed Nest context. [`AGENTS.md`](../../AGENTS.md) states timer survival as a safety rule; this entry is the open change.
-- **Source:** PR #8 and PR #9 reviews, `backend/src/operation/operation.service.ts`, 2026-09-13. https://github.com/roeebracha/nissim-smart-garden/pull/9
 
 ## 19. Thin Operation, and one MQTT client for subscribe and publish
 
@@ -126,7 +156,7 @@ Infrastructure choices in [`docs/infra-terraform.md`](../infra-terraform.md) wer
   - Continue into firmware and a richer edge next.
   - Finish a thin Operation, then ML, LLM, a small approve API, and real GCP, and leave the edge optional.
 - **Decision:** Remaining order: (1) thin Operation, (2) ML batch on `automation_rules`, (3) LLM plus a `suggestions` table, (4) a thin API to approve a suggestion, (5) real GCP resources, then WIF / plan / deploy, (6) frontend only if we want it. Firmware, ack / `reportedState`, the watchdog, and RAG stay out of scope unless a later decision includes them.
-- **Consequences:** LLM and ML depend on stored data and on clear layers, not on an ESP32. Thin Operation is the only door to the physical world (decision 2) and writes `actuator_events` for a later explanation. Real infra comes after there is something to deploy. Same restraint as decision 3. Operation has since landed (PR #9) and the ML batch has since landed (PR #10). The roadmap section in `docs/architecture.md` now lists those as present. Still listed as remaining: LLM and `suggestions`, the approve API, real GCP, optional frontend.
+- **Consequences:** LLM and ML depend on stored data and on clear layers, not on an ESP32. Thin Operation is the only door to the physical world (decision 2) and writes `actuator_events` for a later explanation. Real infra comes after there is something to deploy. Same restraint as decision 3. Operation has since landed (PR #9) and the ML batch has since landed (PR #10). The roadmap section in `docs/architecture.md` now lists those as present. Still listed as remaining: LLM and `suggestions`, the approve API, real GCP, optional frontend. Decision 25 closes that optional frontend: this repository is backend-only, and the UI lives in home-finance.
 - **Source:** `docs/architecture.md` decision 18; commit `ea42229` (2026-09-12); PR #7 body.
 
 ## 17. Remove the Claude PR-review workflow
