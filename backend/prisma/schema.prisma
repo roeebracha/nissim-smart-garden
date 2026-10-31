@@ -20,6 +20,7 @@ model Planter {
   actuators       Actuator[]
   automationRules AutomationRule[]
   llmInsights     LlmInsight[]
+  suggestions     Suggestion[]
 
   @@map("planters")
 }
@@ -136,9 +137,35 @@ model AutomationRule {
 model LlmInsight {
   id        Int      @id @default(autoincrement())
   content   String
+  // Tool-call sequence for this answer (decision #2). Kept out of `content`
+  // so the stored text stays the human-readable answer.
+  trace     Json     @default("[]")
   createdAt DateTime @default(now())
   planterId Int?
   planter   Planter? @relation(fields: [planterId], references: [id])
 
   @@map("llm_insights")
+}
+
+// This module only inserts `pending`. The approved transition is a later API
+// (decision #2): a suggestion is not an automation rule until a person approves it.
+enum SuggestionStatus {
+  pending
+}
+
+model Suggestion {
+  id           Int                @id @default(autoincrement())
+  status       SuggestionStatus   @default(pending)
+  planterId    Int
+  planter      Planter            @relation(fields: [planterId], references: [id])
+  sensorType   String
+  actuatorType String
+  onThreshold  Float
+  offThreshold Float
+  operator     ThresholdOperator
+  summary      String
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@map("suggestions")
 }

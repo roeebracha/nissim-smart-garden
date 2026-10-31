@@ -57,6 +57,10 @@ services:
       # same networking rule as postgres.
       MQTT_BROKER_HOST: ${MQTT_BROKER_HOST}
       MQTT_BROKER_PORT: ${MQTT_BROKER_PORT}
+      # On-demand Claude (decision #2). Empty until set; POST /llm/ask
+      # then returns 503. The rule loop does not read these.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
     ports:
       - "3000:3000"
     depends_on:
