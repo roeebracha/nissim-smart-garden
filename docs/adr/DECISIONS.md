@@ -4,9 +4,9 @@ Single log of architecture decisions, newest first. Numbers **1–20** are the o
 
 **21, 22, and 23** had no number in the repo. They are follow-ups from pull-request reviews. The numbers are the next integers, in the order the reviews raised them: 21 on 2026-09-13, then 22 and 23 on 2026-10-07. They were first recorded here as **Proposed**. Roee accepted them in chat on 16 Oct 2026. The date on each of those rows is the acceptance date, 2026-10-16. The original review date stays in the row.
 
-**24** is the frontend choice. It is not a numbered decision in `docs/architecture.md`. Roee approved it in chat on 16 Oct 2026.
+**24** recorded a frontend in this repo. It is not a numbered decision in `docs/architecture.md`. Roee approved it in chat on 16 Oct 2026. **25** supersedes it. On 31 Oct 2026 Roee decided this repository is backend-only and that the UI lives in the separate home-finance app.
 
-Dates are the author date of the commit that recorded the decision, unless a row says otherwise. Status is only **Accepted** or **Proposed**. Decision 8 was later undone by decision 17; both stay Accepted, and 17’s consequences say the workflow is gone.
+Dates are the author date of the commit that recorded the decision, unless a row says otherwise. Status is only **Accepted** or **Proposed**. Decision 8 was later undone by decision 17; both stay Accepted, and 17’s consequences say the workflow is gone. Decision 24 was later superseded by decision 25; both stay Accepted, and 25’s consequences say this repository has no frontend.
 
 Infrastructure choices in [`docs/infra-terraform.md`](../infra-terraform.md) were never numbered. They are at the bottom, under the same headings, without invented numbers.
 
@@ -14,7 +14,8 @@ Infrastructure choices in [`docs/infra-terraform.md`](../infra-terraform.md) wer
 
 | Number | Date | Status | Title |
 |---|---|---|---|
-| 24 | 2026-10-16 | Accepted | Frontend chosen as React + shadcn/ui |
+| 25 | 2026-10-31 | Accepted | This repository is backend-only; UI stays in home-finance |
+| 24 | 2026-10-16 | Accepted | Frontend chosen as React + shadcn/ui (superseded by 25) |
 | 23 | 2026-10-16 | Accepted | Run the 03:00 calibration cron in Asia/Jerusalem |
 | 22 | 2026-10-16 | Accepted | Nightly calibration never narrows the on/off band |
 | 21 | 2026-10-16 | Accepted | Re-arm the pump max-on timer on startup and clear it on destroy |
@@ -41,18 +42,31 @@ Infrastructure choices in [`docs/infra-terraform.md`](../infra-terraform.md) wer
 | 1 | 2026-08-15 | Accepted | MQTT with self-hosted Mosquitto |
 | — | 2026-08-15 | Accepted | Infrastructure decisions with no number (see end) |
 
+## 25. This repository is backend-only; UI stays in home-finance
+
+- **Number:** 25
+- **Date:** 2026-10-31
+- **Status:** Accepted
+- **Context:** Decision 18 left a frontend optional. Decision 24 then chose Vite + React + TypeScript + shadcn/ui in `frontend/` for a garden dashboard. PR #17 built that dashboard on this branch and was closed on 2026-10-31 without merging. The garden UI already lives in a separate app, home-finance (React/Vite + Express on Vercel). This repository’s subject is the NestJS backend, Postgres, and MQTT.
+- **Options:**
+  - Keep a garden frontend in this repo, as decision 24 describes.
+  - No frontend in this repo. home-finance is the only UI. It calls this backend’s HTTP API later.
+- **Decision:** nissim-smart-garden is backend-only. NestJS, Postgres, and MQTT run as Docker services. This repository has no frontend of its own. All UI lives in home-finance. That app will later call this backend’s secured HTTP API: CORS for the home-finance origin, authentication, and explicit authorization for control actions.
+- **Consequences:** Decision 24 stays in the log as history and does not authorize a `frontend/` directory. PR #17 is closed and is not merged. There is no Next.js app and no Vite app in this repo. The later HTTP API allows the home-finance origin only, requires authentication, and requires an explicit authorization check before a control action. The browser does not publish MQTT. How authentication and authorization are implemented is a later decision. Decision 18’s optional-frontend item is closed by this entry.
+- **Source:** Decided by Roee on 2026-10-31. Dashboard PR #17 (closed): https://github.com/roeebracha/nissim-smart-garden/pull/17
+
 ## 24. Frontend chosen as React + shadcn/ui
 
 - **Number:** 24
 - **Date:** 2026-10-16
 - **Status:** Accepted
-- **Context:** Decision 18 left the frontend optional (item 6 in this log’s remaining order; step 4 of the remaining list in [`docs/architecture.md`](../architecture.md)). The tools section of that doc lists Next.js as under discussion, not as a numbered decision. Roee required a very simple dashboard tonight.
+- **Context:** Decision 18 left the frontend optional (item 6 in this log’s remaining order; step 4 of the remaining list in [`docs/architecture.md`](../architecture.md)). The tools section of that doc lists Next.js as under discussion, not as a numbered decision. Roee required a very simple dashboard tonight. Decision 25 later superseded this choice.
 - **Options:**
   - Next.js.
   - Vite + React + TypeScript + shadcn/ui.
 - **Decision:** Vite + React + TypeScript + shadcn/ui, in `frontend/`, after the backend in decision 18’s order.
-- **Consequences:** PR 9 builds it. The approve button calls PR 5’s route (`POST /suggestions/:id/approve`). No Next.js app.
-- **Source:** Approved by Roee in chat on 16 Oct 2026.
+- **Consequences:** The text at the time pointed at a follow-up pull request that would build the dashboard and call `POST /suggestions/:id/approve`, and it ruled out a Next.js app. That build was PR #17. Decision 25 (2026-10-31) supersedes this entry: PR #17 was closed without merging, and this repository does not gain a `frontend/`.
+- **Source:** Approved by Roee in chat on 16 Oct 2026. Superseded by decision 25.
 
 ## 23. Run the 03:00 calibration cron in Asia/Jerusalem
 
@@ -142,7 +156,7 @@ Infrastructure choices in [`docs/infra-terraform.md`](../infra-terraform.md) wer
   - Continue into firmware and a richer edge next.
   - Finish a thin Operation, then ML, LLM, a small approve API, and real GCP, and leave the edge optional.
 - **Decision:** Remaining order: (1) thin Operation, (2) ML batch on `automation_rules`, (3) LLM plus a `suggestions` table, (4) a thin API to approve a suggestion, (5) real GCP resources, then WIF / plan / deploy, (6) frontend only if we want it. Firmware, ack / `reportedState`, the watchdog, and RAG stay out of scope unless a later decision includes them.
-- **Consequences:** LLM and ML depend on stored data and on clear layers, not on an ESP32. Thin Operation is the only door to the physical world (decision 2) and writes `actuator_events` for a later explanation. Real infra comes after there is something to deploy. Same restraint as decision 3. Operation has since landed (PR #9) and the ML batch has since landed (PR #10). The roadmap section in `docs/architecture.md` now lists those as present. Still listed as remaining: LLM and `suggestions`, the approve API, real GCP, optional frontend.
+- **Consequences:** LLM and ML depend on stored data and on clear layers, not on an ESP32. Thin Operation is the only door to the physical world (decision 2) and writes `actuator_events` for a later explanation. Real infra comes after there is something to deploy. Same restraint as decision 3. Operation has since landed (PR #9) and the ML batch has since landed (PR #10). The roadmap section in `docs/architecture.md` now lists those as present. Still listed as remaining: LLM and `suggestions`, the approve API, real GCP, optional frontend. Decision 25 closes that optional frontend: this repository is backend-only, and the UI lives in home-finance.
 - **Source:** `docs/architecture.md` decision 18; commit `ea42229` (2026-09-12); PR #7 body.
 
 ## 17. Remove the Claude PR-review workflow
