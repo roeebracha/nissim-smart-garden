@@ -122,12 +122,12 @@ jobs:  # the required checks before merge
         run: |  # two commands in one step
           terraform init -backend=false  # download providers; do not talk to GCS state
           terraform validate  # syntax/schema check, no GCP apply
-      - name: Validate dev  # still a skeleton — fail if the files are invalid
+      - name: Validate dev  # stage-1 modules — fail if the files are invalid
         working-directory: infra/terraform/environments/dev  # dev root module
         run: |  # two commands in one step
           terraform init -backend=false  # download providers; do not talk to GCS state
           terraform validate  # syntax/schema check, no GCP apply
-      - name: Validate prod  # still a skeleton — fail if the files are invalid
+      - name: Validate prod  # stage-1 modules — fail if the files are invalid
         working-directory: infra/terraform/environments/prod  # prod root module
         run: |  # two commands in one step
           terraform init -backend=false  # download providers; do not talk to GCS state
